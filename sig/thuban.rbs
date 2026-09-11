@@ -1,0 +1,128 @@
+module Thuban
+  VERSION: String
+  type object = [String, String]
+
+  interface _Differ
+    def edits: (Porrima::lines, Porrima::lines) -> Array[Porrima::Edit]
+  end
+
+  class CorruptObject < StandardError
+  end
+
+  class Commit < Struct[untyped]
+    attr_accessor oid: String
+    attr_accessor tree: String?
+    attr_accessor parents: Array[String]
+    attr_accessor author: String?
+    attr_accessor committer: String?
+    attr_accessor message: String
+    def self.new: (oid: String, ?tree: String?, parents: Array[String], ?author: String?, ?committer: String?, message: String) -> instance
+  end
+
+  class TreeEntry < Struct[untyped]
+    attr_accessor path: String
+    attr_accessor oid: String
+    attr_accessor mode: Integer
+    def self.new: (path: String, oid: String, mode: Integer) -> instance
+  end
+
+  class Repository
+    attr_reader root: String?
+    attr_reader git_dir: String
+    attr_reader common_dir: String
+    attr_reader odb: ObjectDatabase
+    def initialize: (String path) -> void
+    def object: (String oid) -> object
+    def index: () -> Index
+    def head: () -> String?
+    def branch: () -> String?
+    def refs: () -> Hash[String, String?]
+    def branches: () -> Array[String]
+    def resolve: (String name, ?Array[String] seen) -> String?
+    def commit: (?String reference) -> Commit?
+    def tree: (?String reference) -> Hash[String, TreeEntry]
+    def blob: (String path, ?reference: String) -> String?
+    def staged_blob: (String path) -> String?
+    def worktree_content: (String path) -> String?
+    def worktree_path: (String path, ?replacing: Array[String]) -> String
+    def write: (String path, String content) -> String
+    def status: () -> Array[Status::Entry]
+    def blame: (String path, ?reference: String, ?differ: _Differ) -> Array[Blame::Line]
+    def checkout: (String name) -> String
+  end
+
+  class ObjectDatabase
+    attr_reader directory: String
+    def initialize: (String directory) -> void
+    def self.hash: (String type, String data) -> String
+    def read: (String oid, ?Array[String] seen) -> object
+    def packs: () -> Array[Pack]
+  end
+
+  class Pack
+    TYPES: Hash[Integer, String]
+    MAX_OBJECT_SIZE: Integer
+    attr_reader path: String
+    attr_reader offsets: Hash[String, Integer]
+    def initialize: (String index_path) -> void
+    def include?: (String oid) -> bool
+    def read: (String oid) ?{ (String) -> object } -> object
+    def self.apply_delta: (String base, String delta) -> String
+  end
+
+  class Index
+    include Enumerable[Entry]
+    class Entry < Struct[untyped]
+      attr_accessor path: String
+      attr_accessor oid: String
+      attr_accessor mode: Integer
+      attr_accessor size: Integer
+      attr_accessor mtime: Integer
+      attr_accessor mtime_nsec: Integer
+      attr_accessor ctime: Integer
+      attr_accessor ctime_nsec: Integer
+      attr_accessor dev: Integer
+      attr_accessor ino: Integer
+      attr_accessor uid: Integer
+      attr_accessor gid: Integer
+      attr_accessor stage: Integer
+      attr_accessor flags: Integer?
+      attr_accessor extended_flags: Integer?
+      def self.new: (path: String, oid: String, mode: Integer, size: Integer, mtime: Integer, mtime_nsec: Integer, ctime: Integer, ctime_nsec: Integer, dev: Integer, ino: Integer, uid: Integer, gid: Integer, stage: Integer, ?flags: Integer?, ?extended_flags: Integer?) -> instance
+    end
+    attr_reader entries: Array[Entry]
+    attr_reader version: Integer
+    attr_reader path: String
+    def initialize: (String path) -> void
+    def each: () -> Enumerator[Entry, Array[Entry]]
+            | () { (Entry) -> void } -> Array[Entry]
+    def []: (String path) -> Entry?
+    def self.encode: (Array[Entry] entries) -> String
+  end
+
+  class Status
+    class Entry < Struct[untyped]
+      attr_accessor path: String
+      attr_accessor index: String
+      attr_accessor worktree: String
+      def self.new: (path: String, index: String, worktree: String) -> instance
+      def code: () -> String
+    end
+    def initialize: (Repository repository) -> void
+    def call: () -> Array[Entry]
+  end
+
+  class Blame
+    class Line < Struct[untyped]
+      attr_accessor line: Integer
+      attr_accessor text: String
+      attr_accessor commit: String
+      attr_accessor author: String?
+      attr_accessor original_line: Integer
+      attr_accessor path: String
+      def self.new: (line: Integer, text: String, commit: String, author: String?, original_line: Integer, path: String) -> instance
+    end
+    def initialize: (Repository repository) -> void
+    def call: (String path, ?reference: String, ?differ: _Differ) -> Array[Line]
+  end
+end

@@ -1,0 +1,30 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: '3.1'
+      - run: bundle install
+      - name: Verify tag and version
+        run: test "${GITHUB_REF_NAME}" = "v$(bundle exec ruby -Ilib -rthuban/version -e 'print Thuban::VERSION')"
+      - name: Test and build
+        run: |
+          bundle exec rake
+          ruby tools/check_isolation.rb
+          bundle exec rbs -I sig -r porrima validate
+          gem build --strict thuban.gemspec --output /tmp/thuban.gem
+      - uses: rubygems/release-gem@7f9650160c1a4e7989fdc9855807bdbd421d8b6b # v1.4.1
