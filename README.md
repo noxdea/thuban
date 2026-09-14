@@ -116,6 +116,20 @@ repo.checkout("feature")
 file atomically. `Repository#checkout` requires a clean tracked worktree and
 aborts on untracked or ignored collisions.
 
+### Match Ignored Paths
+
+Load Git's global excludes, `.git/info/exclude`, and nested `.gitignore` files.
+Thuban also reads nested `.ignore` files for editor compatibility:
+
+```ruby
+ignore = Thuban::IgnoreMatcher.load(Dir.pwd)
+ignore.ignored?("tmp/output.log")
+ignore.ignored?("build", directory: true)
+```
+
+Pass root-relative or absolute files as `extra_files:` to apply them last, or
+set `global: false` to skip the global `$XDG_CONFIG_HOME/git/ignore` file.
+
 ## Scope
 
 Thuban does not perform network operations such as fetch or push, rewrite

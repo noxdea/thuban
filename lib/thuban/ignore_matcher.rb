@@ -4,6 +4,23 @@ module Thuban
   class IgnoreMatcher
     Rule = Struct.new(:base, :expression, :negated, :directory, keyword_init: true)
 
+    def self.load(root, extra_files: [], global: true)
+      root = File.realpath(root)
+      raise ArgumentError, "ignore root must be a directory" unless File.directory?(root)
+
+      matcher = new
+      matcher = add_file(matcher, global_ignore_file) if global
+      matcher = add_file(matcher, repository_exclude_file(root))
+      matcher = discover(root, "", matcher)
+      Array(extra_files).each do |file|
+        absolute = File.expand_path(file, root)
+        relative = absolute.delete_prefix(root + File::SEPARATOR)
+        base = absolute == relative ? "" : File.dirname(relative)
+        matcher = add_file(matcher, absolute, base == "." ? "" : base)
+      end
+      matcher
+    end
+
     def initialize(rules = [])
       @rules = rules.freeze
     end
@@ -31,15 +48,66 @@ module Thuban
     end
 
     def ignored?(path, directory: false)
-      ignored = false
-      @rules.each do |rule|
-        next if rule.directory && !directory
-        next unless rule.base.empty? || path.start_with?(rule.base + "/")
+      parts = path.to_s.sub(%r{\A\./}, "").delete_suffix("/").split("/")
+      parts.each_index do |index|
+        candidate = parts[0..index].join("/")
+        candidate_directory = index < parts.length - 1 || directory
+        ignored = false
+        @rules.each do |rule|
+          next if rule.directory && !candidate_directory
+          next unless rule.base.empty? || candidate.start_with?(rule.base + "/")
 
-        local = rule.base.empty? ? path : path[(rule.base.length + 1)..]
-        ignored = !rule.negated if rule.expression.match?(local)
+          local = rule.base.empty? ? candidate : candidate[(rule.base.length + 1)..]
+          ignored = !rule.negated if rule.expression.match?(local)
+        end
+        return true if ignored
       end
-      ignored
+      false
+    end
+
+    class << self
+      private
+
+      def add_file(matcher, path, base = "")
+        path && File.file?(path) ? matcher.add(File.read(path, encoding: "UTF-8"), base: base) : matcher
+      end
+
+      def discover(root, directory, matcher)
+        %w[.gitignore .ignore].each do |name|
+          matcher = add_file(matcher, File.join(root, directory, name), directory)
+        end
+        Dir.children(File.join(root, directory)).sort.each do |name|
+          next if name == ".git"
+
+          relative = directory.empty? ? name : File.join(directory, name)
+          absolute = File.join(root, relative)
+          matcher = discover(root, relative, matcher) if File.directory?(absolute) && !File.symlink?(absolute) && !matcher.ignored?(relative, directory: true)
+        rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP
+          next
+        end
+        matcher
+      end
+
+      def global_ignore_file
+        config = ENV["XDG_CONFIG_HOME"]
+        config = File.join(Dir.home, ".config") if !config || config.empty?
+        File.join(config, "git", "ignore")
+      end
+
+      def repository_exclude_file(root)
+        git_dir = File.join(root, ".git")
+        if File.file?(git_dir)
+          value = File.read(git_dir).strip
+          return unless value.start_with?("gitdir: ")
+
+          git_dir = File.expand_path(value.delete_prefix("gitdir: "), root)
+        end
+        return unless File.directory?(git_dir)
+
+        common = File.join(git_dir, "commondir")
+        git_dir = File.expand_path(File.read(common).strip, git_dir) if File.file?(common)
+        File.join(git_dir, "info", "exclude")
+      end
     end
 
     private

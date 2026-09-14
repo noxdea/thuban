@@ -26,6 +26,20 @@ module Thuban
     def self.new: (path: String, oid: String, mode: Integer) -> instance
   end
 
+  class IgnoreMatcher
+    class Rule < Struct[untyped]
+      attr_accessor base: String
+      attr_accessor expression: Regexp
+      attr_accessor negated: bool
+      attr_accessor directory: bool
+      def self.new: (base: String, expression: Regexp, negated: bool, directory: bool) -> instance
+    end
+    def self.load: (String root, ?extra_files: Array[String], ?global: bool) -> IgnoreMatcher
+    def initialize: (?Array[Rule] rules) -> void
+    def add: (String source, ?base: String) -> IgnoreMatcher
+    def ignored?: (String path, ?directory: bool) -> bool
+  end
+
   class Repository
     attr_reader root: String?
     attr_reader git_dir: String
