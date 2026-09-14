@@ -105,12 +105,22 @@ module Thuban
         else
           files << File.join(xdg_config_home, "git", "config") << File.join(Dir.home, ".gitconfig")
         end
-        git_dir = repository_git_dir(root)
-        files << File.join(git_dir, "config") if git_dir
+        if (git_dirs = repository_git_dirs(root))
+          worktree_dir, common_dir = git_dirs
+          common_config = File.join(common_dir, "config")
+          files << common_config
+          files << File.join(worktree_dir, "config.worktree") if worktree_config?(common_config)
+        end
         files
       end
 
-      def excludes_file_from(path)
+      def excludes_file_from(path) = config_value(path, "core", "excludesfile")
+
+      def worktree_config?(path)
+        %w[true yes on 1].include?(config_value(path, "extensions", "worktreeconfig").to_s.downcase)
+      end
+
+      def config_value(path, wanted_section, wanted_key)
         section = nil
         value = nil
         File.foreach(path, encoding: "UTF-8") do |line|
@@ -119,14 +129,37 @@ module Thuban
 
           if (match = line.match(/\A\[\s*([^\s\]"]+)\s*\]\z/))
             section = match[1].downcase
-          elsif section == "core" && (match = line.match(/\Aexcludesfile\s*=\s*(.*?)\s*\z/i))
-            value = match[1]
-            value = value[1...-1].gsub(/\\(["\\])/, "\\1") if value.start_with?("\"") && value.end_with?("\"")
+          elsif section == wanted_section && (match = line.match(/\A#{Regexp.escape(wanted_key)}\s*=\s*(.*)\z/i))
+            value = parse_config_value(match[1])
           end
         end
         value
       rescue Errno::ENOENT, Errno::EACCES
         nil
+      end
+
+      def parse_config_value(source)
+        escapes = {"n" => "\n", "t" => "\t", "b" => "\b", "\\" => "\\", "\"" => "\""}
+        value = +""
+        significant = 0
+        quoted = escaped = false
+        source.each_char do |character|
+          if escaped
+            value << escapes.fetch(character, character)
+            significant = value.length
+            escaped = false
+          elsif character == "\\"
+            escaped = true
+          elsif character == "\""
+            quoted = !quoted
+          elsif !quoted && ["#", ";"].include?(character)
+            break
+          else
+            value << character
+            significant = value.length if quoted || !character.match?(/\s/)
+          end
+        end
+        value[0, significant]
       end
 
       def xdg_config_home
@@ -135,11 +168,11 @@ module Thuban
       end
 
       def repository_exclude_file(root)
-        git_dir = repository_git_dir(root)
-        File.join(git_dir, "info", "exclude") if git_dir
+        git_dirs = repository_git_dirs(root)
+        File.join(git_dirs[1], "info", "exclude") if git_dirs
       end
 
-      def repository_git_dir(root)
+      def repository_git_dirs(root)
         git_dir = File.join(root, ".git")
         if File.file?(git_dir)
           value = File.read(git_dir).strip
@@ -150,8 +183,8 @@ module Thuban
         return unless File.directory?(git_dir)
 
         common = File.join(git_dir, "commondir")
-        git_dir = File.expand_path(File.read(common).strip, git_dir) if File.file?(common)
-        git_dir
+        common_dir = File.file?(common) ? File.expand_path(File.read(common).strip, git_dir) : git_dir
+        [git_dir, common_dir]
       end
     end
 

@@ -130,7 +130,8 @@ ignore.ignored?("build", directory: true)
 Pass root-relative or absolute files as `extra_files:` to apply them last, or
 set `global: false` to skip `core.excludesFile` and the default global ignore
 file. Thuban resolves the setting from system, XDG, home, and repository config
-files; included configs and command-scoped overrides are not evaluated.
+files, followed by an enabled worktree config. Included configs, line
+continuations, and command-scoped overrides are not evaluated.
 
 ## Scope
 

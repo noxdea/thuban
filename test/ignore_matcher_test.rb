@@ -90,6 +90,60 @@ class IgnoreMatcherTest < Minitest::Test
     end
   end
 
+  def test_load_resolves_worktree_specific_excludes_after_common_config
+    write("tracked.txt", "x")
+    git("add", ".")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Initial")
+    git("config", "extensions.worktreeConfig", "true")
+    linked = File.join(@home, "linked")
+    git("worktree", "add", "-q", "-b", "linked", linked)
+    common_ignore = File.join(@home, "common.ignore")
+    worktree_ignore = File.join(@home, "worktree.ignore")
+    write(common_ignore, "common.ignored\n")
+    write(worktree_ignore, "worktree.ignored\n")
+    append(".git/config", "\n[core]\n excludesFile = #{common_ignore}\n")
+    git_dir = File.expand_path(File.read(File.join(linked, ".git")).strip.delete_prefix("gitdir: "), linked)
+    write(File.join(git_dir, "config.worktree"), "[core]\n excludesFile = #{worktree_ignore}\n")
+    %w[common.ignored worktree.ignored].each { |path| File.binwrite(File.join(linked, path), "x") }
+
+    with_global_ignore do
+      matcher = Thuban::IgnoreMatcher.load(linked)
+      refute matcher.ignored?("common.ignored")
+      assert matcher.ignored?("worktree.ignored")
+      %w[common.ignored worktree.ignored].each do |path|
+        assert_equal git_ignored?(path, root: linked), matcher.ignored?(path), path
+      end
+    end
+  end
+
+  def test_git_config_path_values_handle_comments_quotes_and_escapes
+    plain_ignore = File.join(@home, "plain.ignore")
+    quoted_ignore = File.join(@home, "quoted #; value.ignore")
+    write(plain_ignore, "plain.ignored\n")
+    write(quoted_ignore, "quoted.ignored\n")
+    write("plain.ignored", "x")
+    write("quoted.ignored", "x")
+
+    with_global_ignore do
+      write(File.join(@home, ".gitconfig"), "[core]\n excludesFile = #{plain_ignore}   # trailing comment\n")
+      matcher = Thuban::IgnoreMatcher.load(@directory)
+      assert matcher.ignored?("plain.ignored")
+      assert_equal git_ignored?("plain.ignored"), matcher.ignored?("plain.ignored")
+
+      config_path = quoted_ignore.tr("\\", "/")
+      write(File.join(@home, ".gitconfig"), "[core]\n excludesFile = \"#{config_path}\" ; trailing comment\n")
+      matcher = Thuban::IgnoreMatcher.load(@directory)
+      assert matcher.ignored?("quoted.ignored")
+      refute matcher.ignored?("plain.ignored")
+      %w[plain.ignored quoted.ignored].each do |path|
+        assert_equal git_ignored?(path), matcher.ignored?(path), path
+      end
+    end
+
+    encoded = %q{"a\"b\\\\c\n\t\b#; " ; trailing comment}
+    assert_equal "a\"b\\c\n\t\b#; ", Thuban::IgnoreMatcher.send(:parse_config_value, encoded)
+  end
+
   def test_load_reads_dot_ignore_and_explicit_extra_files_last
     write(".gitignore", "*.tmp\n")
     write(".ignore", "*.generated\n")
@@ -148,10 +202,10 @@ class IgnoreMatcherTest < Minitest::Test
     assert status.success?, error
   end
 
-  def git_ignored?(path)
+  def git_ignored?(path, root: @directory)
     _output, _error, status = Open3.capture3(
       {"GIT_CONFIG_SYSTEM" => @system_config, "XDG_CONFIG_HOME" => @config_home, "HOME" => @home},
-      "git", "-C", @directory, "check-ignore", "--no-index", "-q", "--", path
+      "git", "-C", root, "check-ignore", "--no-index", "-q", "--", path
     )
     status.success?
   end
