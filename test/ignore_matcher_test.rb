@@ -5,12 +5,15 @@ require_relative "test_helper"
 class IgnoreMatcherTest < Minitest::Test
   def setup
     @directory = Dir.mktmpdir("thuban-ignore-")
+    @home = Dir.mktmpdir("thuban-home-")
     @config_home = Dir.mktmpdir("thuban-config-")
+    @system_config = File.join(@home, "system.gitconfig")
     git("init", "-q")
   end
 
   def teardown
     FileUtils.remove_entry(@directory)
+    FileUtils.remove_entry(@home)
     FileUtils.remove_entry(@config_home)
   end
 
@@ -53,6 +56,40 @@ class IgnoreMatcherTest < Minitest::Test
     end
   end
 
+  def test_load_resolves_configured_global_ignore_by_git_precedence
+    ignores = {
+      system: File.join(@home, "system.ignore"),
+      xdg: File.join(@home, "xdg.ignore"),
+      home: File.join(@home, "home.ignore"),
+      repository: File.join(@home, "repository.ignore")
+    }
+    ignores.each { |name, path| write(path, "#{name}.ignored\n") }
+    ignores.each_key { |name| write("#{name}.ignored", "x") }
+    write(@system_config, "[core]\n excludesFile = #{ignores[:system]}\n")
+
+    with_global_ignore do
+      assert Thuban::IgnoreMatcher.load(@directory).ignored?("system.ignored")
+
+      write(File.join(@config_home, "git", "config"), "[core]\n excludesFile = #{ignores[:xdg]}\n")
+      matcher = Thuban::IgnoreMatcher.load(@directory)
+      assert matcher.ignored?("xdg.ignored")
+      refute matcher.ignored?("system.ignored")
+
+      write(File.join(@home, ".gitconfig"), "[core]\n excludesFile = ~/home.ignore\n")
+      matcher = Thuban::IgnoreMatcher.load(@directory)
+      assert matcher.ignored?("home.ignored")
+      refute matcher.ignored?("xdg.ignored")
+
+      append(".git/config", "\n[core]\n excludesFile = #{ignores[:repository]}\n")
+      matcher = Thuban::IgnoreMatcher.load(@directory)
+      assert matcher.ignored?("repository.ignored")
+      refute matcher.ignored?("home.ignored")
+      ignores.each_key do |name|
+        assert_equal git_ignored?("#{name}.ignored"), matcher.ignored?("#{name}.ignored"), name.to_s
+      end
+    end
+  end
+
   def test_load_reads_dot_ignore_and_explicit_extra_files_last
     write(".gitignore", "*.tmp\n")
     write(".ignore", "*.generated\n")
@@ -74,6 +111,36 @@ class IgnoreMatcherTest < Minitest::Test
     assert Thuban::IgnoreMatcher.load(@directory, global: false).ignored?("locked/keep.txt")
   end
 
+  def test_extra_files_can_reinclude_a_directory_with_nested_rules
+    write(".gitignore", "vendor/\n")
+    write("vendor/.gitignore", "*.secret\n")
+    write("editor.ignore", "!vendor/\n")
+
+    matcher = Thuban::IgnoreMatcher.load(@directory, extra_files: ["editor.ignore"], global: false)
+    refute matcher.ignored?("vendor/file.txt")
+    assert matcher.ignored?("vendor/key.secret")
+  end
+
+  def test_discovery_does_not_follow_symlinked_ignore_files
+    git_ignore = File.join(@home, "git-ignore")
+    editor_ignore = File.join(@home, "editor-ignore")
+    write(git_ignore, "git-only.txt\n")
+    write(editor_ignore, "editor-only.txt\n")
+    begin
+      File.symlink(git_ignore, File.join(@directory, ".gitignore"))
+      File.symlink(editor_ignore, File.join(@directory, ".ignore"))
+    rescue NotImplementedError, Errno::EACCES
+      skip "symlinks are unavailable"
+    end
+    write("git-only.txt", "x")
+    write("editor-only.txt", "x")
+
+    matcher = Thuban::IgnoreMatcher.load(@directory, global: false)
+    refute matcher.ignored?("git-only.txt")
+    refute matcher.ignored?("editor-only.txt")
+    assert_equal git_ignored?("git-only.txt"), matcher.ignored?("git-only.txt")
+  end
+
   private
 
   def git(*arguments)
@@ -83,7 +150,7 @@ class IgnoreMatcherTest < Minitest::Test
 
   def git_ignored?(path)
     _output, _error, status = Open3.capture3(
-      {"XDG_CONFIG_HOME" => @config_home, "HOME" => @config_home},
+      {"GIT_CONFIG_SYSTEM" => @system_config, "XDG_CONFIG_HOME" => @config_home, "HOME" => @home},
       "git", "-C", @directory, "check-ignore", "--no-index", "-q", "--", path
     )
     status.success?
@@ -95,11 +162,17 @@ class IgnoreMatcherTest < Minitest::Test
     File.binwrite(absolute, contents)
   end
 
+  def append(path, contents)
+    File.open(File.absolute_path(path, @directory), "ab") { |file| file.write(contents) }
+  end
+
   def with_global_ignore
-    previous_xdg, previous_home = ENV["XDG_CONFIG_HOME"], ENV["HOME"]
-    ENV["XDG_CONFIG_HOME"] = ENV["HOME"] = @config_home
+    previous_system, previous_xdg, previous_home = ENV["GIT_CONFIG_SYSTEM"], ENV["XDG_CONFIG_HOME"], ENV["HOME"]
+    ENV["GIT_CONFIG_SYSTEM"] = @system_config
+    ENV["XDG_CONFIG_HOME"] = @config_home
+    ENV["HOME"] = @home
     yield
   ensure
-    ENV["XDG_CONFIG_HOME"], ENV["HOME"] = previous_xdg, previous_home
+    ENV["GIT_CONFIG_SYSTEM"], ENV["XDG_CONFIG_HOME"], ENV["HOME"] = previous_system, previous_xdg, previous_home
   end
 end

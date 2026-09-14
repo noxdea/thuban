@@ -8,11 +8,12 @@ module Thuban
       root = File.realpath(root)
       raise ArgumentError, "ignore root must be a directory" unless File.directory?(root)
 
+      extra_files = Array(extra_files)
       matcher = new
-      matcher = add_file(matcher, global_ignore_file) if global
+      matcher = add_file(matcher, global_ignore_file(root)) if global
       matcher = add_file(matcher, repository_exclude_file(root))
-      matcher = discover(root, "", matcher)
-      Array(extra_files).each do |file|
+      matcher = discover(root, "", matcher, prune: extra_files.empty?)
+      extra_files.each do |file|
         absolute = File.expand_path(file, root)
         relative = absolute.delete_prefix(root + File::SEPARATOR)
         base = absolute == relative ? "" : File.dirname(relative)
@@ -72,29 +73,73 @@ module Thuban
         path && File.file?(path) ? matcher.add(File.read(path, encoding: "UTF-8"), base: base) : matcher
       end
 
-      def discover(root, directory, matcher)
+      def discover(root, directory, matcher, prune:)
         %w[.gitignore .ignore].each do |name|
-          matcher = add_file(matcher, File.join(root, directory, name), directory)
+          path = File.join(root, directory, name)
+          matcher = add_file(matcher, path, directory) unless File.symlink?(path)
         end
         Dir.children(File.join(root, directory)).sort.each do |name|
           next if name == ".git"
 
           relative = directory.empty? ? name : File.join(directory, name)
           absolute = File.join(root, relative)
-          matcher = discover(root, relative, matcher) if File.directory?(absolute) && !File.symlink?(absolute) && !matcher.ignored?(relative, directory: true)
+          matcher = discover(root, relative, matcher, prune: prune) if File.directory?(absolute) && !File.symlink?(absolute) && (!prune || !matcher.ignored?(relative, directory: true))
         rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP
           next
         end
         matcher
       end
 
-      def global_ignore_file
-        config = ENV["XDG_CONFIG_HOME"]
-        config = File.join(Dir.home, ".config") if !config || config.empty?
-        File.join(config, "git", "ignore")
+      def global_ignore_file(root)
+        configured = git_config_files(root).filter_map { |path| excludes_file_from(path) }.last
+        return File.expand_path(configured, root) if configured
+
+        File.join(xdg_config_home, "git", "ignore")
+      end
+
+      def git_config_files(root)
+        files = []
+        files << (ENV["GIT_CONFIG_SYSTEM"] || "/etc/gitconfig") unless ENV["GIT_CONFIG_NOSYSTEM"]
+        if ENV["GIT_CONFIG_GLOBAL"]
+          files << ENV["GIT_CONFIG_GLOBAL"]
+        else
+          files << File.join(xdg_config_home, "git", "config") << File.join(Dir.home, ".gitconfig")
+        end
+        git_dir = repository_git_dir(root)
+        files << File.join(git_dir, "config") if git_dir
+        files
+      end
+
+      def excludes_file_from(path)
+        section = nil
+        value = nil
+        File.foreach(path, encoding: "UTF-8") do |line|
+          line = line.strip
+          next if line.empty? || line.start_with?("#", ";")
+
+          if (match = line.match(/\A\[\s*([^\s\]"]+)\s*\]\z/))
+            section = match[1].downcase
+          elsif section == "core" && (match = line.match(/\Aexcludesfile\s*=\s*(.*?)\s*\z/i))
+            value = match[1]
+            value = value[1...-1].gsub(/\\(["\\])/, "\\1") if value.start_with?("\"") && value.end_with?("\"")
+          end
+        end
+        value
+      rescue Errno::ENOENT, Errno::EACCES
+        nil
+      end
+
+      def xdg_config_home
+        value = ENV["XDG_CONFIG_HOME"]
+        !value || value.empty? ? File.join(Dir.home, ".config") : value
       end
 
       def repository_exclude_file(root)
+        git_dir = repository_git_dir(root)
+        File.join(git_dir, "info", "exclude") if git_dir
+      end
+
+      def repository_git_dir(root)
         git_dir = File.join(root, ".git")
         if File.file?(git_dir)
           value = File.read(git_dir).strip
@@ -106,7 +151,7 @@ module Thuban
 
         common = File.join(git_dir, "commondir")
         git_dir = File.expand_path(File.read(common).strip, git_dir) if File.file?(common)
-        File.join(git_dir, "info", "exclude")
+        git_dir
       end
     end
 

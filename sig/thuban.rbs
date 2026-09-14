@@ -32,7 +32,7 @@ module Thuban
       attr_accessor expression: Regexp
       attr_accessor negated: bool
       attr_accessor directory: bool
-      def self.new: (base: String, expression: Regexp, negated: bool, directory: bool) -> instance
+      def self.new: (?base: String, ?expression: Regexp, ?negated: bool, ?directory: bool) -> instance
     end
     def self.load: (String root, ?extra_files: Array[String], ?global: bool) -> IgnoreMatcher
     def initialize: (?Array[Rule] rules) -> void
