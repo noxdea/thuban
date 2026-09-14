@@ -40,7 +40,7 @@ data without invoking the Git executable.
 Add Thuban to your Gemfile:
 
 ```ruby
-gem "thuban", "~> 0.1.0"
+gem "thuban", "~> 0.2.0"
 ```
 
 Then install it:
