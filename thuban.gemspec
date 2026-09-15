@@ -19,5 +19,5 @@ Gem::Specification.new do |spec|
   }
   spec.files = Dir.chdir(__dir__) { Dir["lib/**/*.rb", "sig/**/*.rbs", "README.md", "CHANGELOG.md", "LICENSE.txt"].select { |path| File.file?(path) } }
   spec.require_paths = ["lib"]
-  spec.add_dependency "porrima", "~> 0.1.0"
+  spec.add_dependency "porrima", "~> 0.2.0"
 end
