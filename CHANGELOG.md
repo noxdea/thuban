@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-09-15
 
 - Add loose object, tree, and commit writing
 - Add index mutation with v2/v3/v4 encoding and raw optional-extension preservation
