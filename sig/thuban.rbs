@@ -26,6 +26,14 @@ module Thuban
     def self.new: (path: String, oid: String, mode: Integer) -> instance
   end
 
+  class Signature < Struct[untyped]
+    attr_accessor name: String
+    attr_accessor email: String
+    attr_accessor time: Time | Integer
+    attr_accessor offset: String | Integer | nil
+    def self.new: (name: String, email: String, ?time: Time | Integer, ?offset: String | Integer?) -> instance
+  end
+
   class IgnoreMatcher
     class Rule < Struct[untyped]
       attr_accessor base: String
@@ -63,6 +71,9 @@ module Thuban
     def status: () -> Array[Status::Entry]
     def blame: (String path, ?reference: String, ?differ: _Differ) -> Array[Blame::Line]
     def checkout: (String name) -> String
+    def write_blob: (String content) -> String
+    def write_tree: (Array[TreeEntry] entries) -> String
+    def write_commit: (tree: String, ?parents: Array[String], author: Signature, ?committer: Signature?, message: String) -> String
   end
 
   class ObjectDatabase
@@ -71,6 +82,9 @@ module Thuban
     def self.hash: (String type, String data) -> String
     def read: (String oid, ?Array[String] seen) -> object
     def packs: () -> Array[Pack]
+    def exist?: (String oid) -> bool
+    def write: (String type, String data) -> String
+    def write_loose: (String type, String data) -> String
   end
 
   class Pack
