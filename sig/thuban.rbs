@@ -6,6 +6,10 @@ module Thuban
     def edits: (Porrima::lines, Porrima::lines) -> Array[Porrima::Edit]
   end
 
+  interface _PackOutput
+    def write: (String) -> Integer
+  end
+
   class CorruptObject < StandardError
   end
 
@@ -123,6 +127,7 @@ module Thuban
     def include?: (String oid) -> bool
     def read: (String oid) ?{ (String) -> object } -> object
     def self.apply_delta: (String base, String delta) -> String
+    def self.write: (_PackOutput io, Enumerable[object] objects) ?{ (Integer current, Integer total) -> void } -> String
   end
 
   class Index
