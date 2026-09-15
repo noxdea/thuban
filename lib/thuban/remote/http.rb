@@ -1,0 +1,189 @@
+# frozen_string_literal: true
+
+require "net/http"
+require "stringio"
+require "uri"
+
+module Thuban
+  module Remote
+    class Connection
+      MAX_ADVERTISEMENT_SIZE = 8 * 1024 * 1024
+
+      def initialize(url, timeout: 30)
+        @uri = parse_url(url)
+        @timeout = Float(timeout)
+        raise ArgumentError, "timeout must be between 0 and 300 seconds" unless @timeout.positive? && @timeout <= 300
+
+        @closed = false
+      rescue ArgumentError, TypeError => error
+        raise error if error.message.start_with?("timeout")
+
+        raise TransportError, "invalid remote URL"
+      end
+
+      def refs
+        ensure_open
+        body = request(:get, "/info/refs", query: "service=git-upload-pack",
+          headers: {"Accept" => "application/x-git-upload-pack-advertisement", "Git-Protocol" => "version=2"},
+          content_type: "application/x-git-upload-pack-advertisement", limit: MAX_ADVERTISEMENT_SIZE)
+        reader = Protocol::Reader.new(StringIO.new(body), max_bytes: MAX_ADVERTISEMENT_SIZE)
+        service = reader.read
+        raise TransportError, "invalid upload-pack advertisement" unless service == "# service=git-upload-pack\n" && reader.read == Protocol::FLUSH
+
+        first = reader.read
+        @refs = if first == "version 2\n"
+          @protocol_version = 2
+          read_v2_refs(reader)
+        else
+          @protocol_version = 0
+          read_v0_refs(reader, first)
+        end
+      end
+
+      def close
+        @closed = true
+        nil
+      end
+
+      private
+
+      def parse_url(url)
+        raise TypeError unless url.is_a?(String)
+
+        uri = URI.parse(url)
+        raise AuthenticationError, "credentials in remote URLs are not supported" if uri.userinfo
+
+        valid = %w[http https].include?(uri.scheme) && uri.host && !uri.host.empty? &&
+          !uri.fragment && !uri.query
+        raise ArgumentError unless valid
+
+        uri
+      end
+
+      def read_v2_refs(reader)
+        capabilities = []
+        loop do
+          packet = reader.read
+          break if packet == Protocol::FLUSH
+          raise TransportError, "truncated capability advertisement" unless packet.is_a?(String)
+
+          capabilities << packet.chomp
+        end
+        reject_non_sha1(capabilities)
+        raise TransportError, "server does not support ls-refs" unless capabilities.any? { |line| line.split("=", 2).first == "ls-refs" }
+
+        @capabilities = capabilities
+        body = Protocol.packet("command=ls-refs\n") + Protocol.delimiter +
+          %w[peel symrefs ref-prefix\ HEAD ref-prefix\ refs/].map { |line| Protocol.packet("#{line}\n") }.join + Protocol.flush
+        response = request(:post, "/git-upload-pack", body: body,
+          headers: {"Content-Type" => "application/x-git-upload-pack-request", "Accept" => "application/x-git-upload-pack-result",
+                    "Git-Protocol" => "version=2"}, content_type: "application/x-git-upload-pack-result", limit: MAX_ADVERTISEMENT_SIZE)
+        parse_v2_ref_lines(Protocol::Reader.new(StringIO.new(response), max_bytes: MAX_ADVERTISEMENT_SIZE))
+      end
+
+      def parse_v2_ref_lines(reader)
+        result = []
+        loop do
+          packet = reader.read
+          break if [Protocol::FLUSH, Protocol::RESPONSE_END].include?(packet)
+          raise TransportError, "truncated ls-refs response" unless packet.is_a?(String)
+          raise TransportError, packet.delete_prefix("ERR ").strip if packet.start_with?("ERR ")
+
+          fields = packet.chomp.split(" ")
+          oid = fields.shift
+          name = Protocol.validate_ref(fields.shift)
+          attributes = fields.to_h { |field| field.split(":", 2) }
+          result << Ref.new(name: name, oid: oid == "unborn" ? nil : Protocol.validate_oid(oid),
+            symref_target: attributes["symref-target"] && Protocol.validate_ref(attributes["symref-target"]),
+            peeled: attributes["peeled"] && Protocol.validate_oid(attributes["peeled"]))
+        end
+        result
+      end
+
+      def read_v0_refs(reader, first)
+        raise TransportError, "empty upload-pack advertisement" unless first.is_a?(String)
+
+        lines = [first]
+        loop do
+          packet = reader.read
+          break if packet == Protocol::FLUSH
+          raise TransportError, "truncated ref advertisement" unless packet.is_a?(String)
+
+          lines << packet
+        end
+        payload, capabilities = lines.first.split("\0", 2)
+        lines[0] = payload
+        @capabilities = capabilities.to_s.chomp.split(" ")
+        reject_non_sha1(@capabilities)
+        symrefs = @capabilities.grep(/\Asymref=/).to_h do |capability|
+          name, target = capability.delete_prefix("symref=").split(":", 2)
+          [Protocol.validate_ref(name), Protocol.validate_ref(target)]
+        end
+        result = []
+        peeled = {}
+        lines.each do |line|
+          raise TransportError, line.delete_prefix("ERR ").strip if line.start_with?("ERR ")
+
+          oid, name = line.chomp.split(" ", 2)
+          next if oid == "0" * 40 && name == "capabilities^{}"
+          next unless name == "HEAD" || name&.start_with?("refs/")
+
+          if name.end_with?("^{}")
+            peeled[name.delete_suffix("^{}")] = Protocol.validate_oid(oid)
+          else
+            name = Protocol.validate_ref(name)
+            result << Ref.new(name: name, oid: Protocol.validate_oid(oid), symref_target: symrefs[name])
+          end
+        end
+        result.each { |ref| ref.peeled = peeled[ref.name] }
+        result
+      end
+
+      def reject_non_sha1(capabilities)
+        format = capabilities.find { |line| line.start_with?("object-format=") }
+        raise TransportError, "remote object format is not SHA-1" if format && format != "object-format=sha1"
+      end
+
+      def request(method, suffix, query: nil, headers: {}, body: nil, content_type:, limit:)
+        endpoint = @uri.dup
+        endpoint.path = @uri.path.sub(%r{/\z}, "") + suffix
+        endpoint.query = query
+        http = Net::HTTP.new(endpoint.host, endpoint.port, nil)
+        http.use_ssl = endpoint.scheme == "https"
+        http.open_timeout = http.read_timeout = @timeout
+        http.write_timeout = @timeout if http.respond_to?(:write_timeout=)
+        request = (method == :get ? Net::HTTP::Get : Net::HTTP::Post).new(endpoint.request_uri, headers.merge("Accept-Encoding" => "identity"))
+        request.body = body if body
+        response_body = +"".b
+        http.start do
+          http.request(request) do |response|
+            validate_response(response, content_type)
+            response.read_body do |chunk|
+              raise TransportError, "HTTP response exceeds size limit" if response_body.bytesize + chunk.bytesize > limit
+
+              response_body << chunk
+            end
+          end
+        end
+        response_body
+      rescue TransportError, AuthenticationError
+        raise
+      rescue Timeout::Error, IOError, SocketError, SystemCallError => error
+        raise TransportError, "HTTP transport failed: #{error.class}"
+      end
+
+      def validate_response(response, content_type)
+        code = response.code.to_i
+        raise AuthenticationError, "remote authentication required" if [401, 403].include?(code)
+        raise TransportError, "HTTP redirects are not supported" if (300...400).cover?(code)
+        raise TransportError, "HTTP request failed (#{code})" unless code == 200
+        actual = response["content-type"].to_s.split(";", 2).first.downcase
+        raise TransportError, "unexpected HTTP content type" unless actual == content_type
+      end
+
+      def ensure_open
+        raise TransportError, "connection is closed" if @closed
+      end
+    end
+  end
+end

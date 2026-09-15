@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add pkt-line parsing and smart HTTP protocol v2/v0 reference discovery
+
 ## 0.3.0 - 2026-09-15
 
 - Add loose object, tree, and commit writing

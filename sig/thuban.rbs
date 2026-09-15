@@ -16,6 +16,33 @@ module Thuban
   class RefLockError < StandardError
   end
 
+  class Error < StandardError
+  end
+
+  class TransportError < Error
+  end
+
+  class AuthenticationError < TransportError
+  end
+
+  class Ref < Struct[untyped]
+    attr_accessor name: String
+    attr_accessor oid: String?
+    attr_accessor symref_target: String?
+    attr_accessor peeled: String?
+    def self.new: (name: String, oid: String?, ?symref_target: String?, ?peeled: String?) -> instance
+  end
+
+  module Remote
+    def self.open: (String url, ?credentials: untyped, ?ssh: untyped, ?timeout: Numeric) -> Connection
+
+    class Connection
+      def initialize: (String url, ?timeout: Numeric) -> void
+      def refs: () -> Array[Ref]
+      def close: () -> nil
+    end
+  end
+
   class Commit < Struct[untyped]
     attr_accessor oid: String
     attr_accessor tree: String?

@@ -34,6 +34,7 @@ executable.
 - Writes loose objects, index entries, refs, reflogs, trees, and commits
 - Finds merge bases and performs reset, cherry-pick, revert, and stash operations
 - Writes interoperable delta-free Git packfiles to any writable IO
+- Discovers smart HTTP protocol v2 and v0 remote references
 - Tracks line history across commits and renames with blame
 - Writes files atomically and checks out branches with collision guards
 - Supports linked worktrees and packed refs
@@ -195,6 +196,25 @@ end
 The emitted PACK v2 stream stores complete compressed objects without delta
 generation. It can be consumed by `git index-pack` and `git verify-pack`.
 
+### Inspect Remote References
+
+Smart HTTP discovery prefers protocol v2 and falls back to v0 when necessary:
+
+```ruby
+connection = Thuban::Remote.open("https://example.com/project.git")
+begin
+  connection.refs.each do |ref|
+    puts [ref.oid, ref.name, ref.symref_target, ref.peeled].compact.join(" ")
+  end
+ensure
+  connection.close
+end
+```
+
+The current transport accepts unauthenticated HTTP(S) URLs only. Redirects,
+URL-embedded credentials, SSH, and explicit credentials are rejected until the
+corresponding authentication and SSH milestones define their handling.
+
 ### Match Ignored Paths
 
 Load Git's global excludes, `.git/info/exclude`, and nested `.gitignore` files.
@@ -216,9 +236,10 @@ continuations, and command-scoped overrides are not evaluated.
 
 The current write API covers loose objects, the index, refs, reflogs, commits,
 guarded checkout, local history operations, stash, and delta-free pack output.
-Thuban does not yet perform network operations, merges, pack delta generation,
-or streaming pack ingestion. It does not provide its own diff algorithm; blame
-delegates line matching to Porrima through the injectable `differ:` argument.
+Thuban can discover smart HTTP refs but does not yet fetch or push. Merges, pack
+delta generation, and streaming pack ingestion are also outside the current
+scope. It does not provide its own diff algorithm; blame delegates line
+matching to Porrima through the injectable `differ:` argument.
 
 Support is limited to the index and pack formats covered by the test suite.
 Submodule checkout and optional Git extensions outside that coverage are not
