@@ -104,11 +104,12 @@ module Thuban
     def replace_repository_state(worktree_tree, index_tree, remove_paths: [])
       raise ArgumentError, "bare repository has no worktree" unless root
       current = index.entries.to_h { |entry| [entry.path, entry] }
+      tracked = head ? tree(head).merge(current) : current
       raise ArgumentError, "submodule updates require separate worktree handling" if
-        (current.values + worktree_tree.values + index_tree.values).any? { |entry| entry.mode == 0o160000 }
+        (tracked.values + worktree_tree.values + index_tree.values).any? { |entry| entry.mode == 0o160000 }
 
-      removed = (current.keys - worktree_tree.keys) | remove_paths
-      check_worktree_collisions(worktree_tree, current, removed)
+      removed = (tracked.keys - worktree_tree.keys) | remove_paths
+      check_worktree_collisions(worktree_tree, tracked, removed)
       contents = worktree_tree.to_h { |path, entry| [path, odb.read(entry.oid).last] }
 
       removed.sort_by { |path| -path.count("/") }.each do |path|

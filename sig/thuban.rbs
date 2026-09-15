@@ -89,6 +89,9 @@ module Thuban
     def reset: (String oid, ?mode: :soft | :mixed | :hard) -> String
     def cherry_pick: (String oid) -> String
     def revert: (String oid) -> String
+    def stash_push: (?message: String?, ?include_untracked: bool) -> String?
+    def stash_pop: (?Integer index) -> String
+    def stash_list: () -> Array[Commit]
   end
 
   class ObjectDatabase

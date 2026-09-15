@@ -6,8 +6,14 @@ module Thuban
       current = index
       raise ArgumentError, "cannot write a tree with unresolved conflicts" unless current.conflicts.empty?
 
+      write_tree_from_entries(current.entries)
+    end
+
+    private
+
+    def write_tree_from_entries(entries)
       root = {}
-      current.entries.each do |entry|
+      entries.each do |entry|
         node = root
         parts = entry.path.split("/")
         raise ArgumentError, "index path nesting exceeds limit" if parts.length > 256
@@ -39,8 +45,6 @@ module Thuban
       update_ref("HEAD", oid, old_oid: previous, message: action)
       oid
     end
-
-    private
 
     def write_index_tree(node)
       entries = node.map do |name, value|
