@@ -16,6 +16,8 @@ module Thuban
         @timeout = Float(timeout)
         raise ArgumentError, "timeout must be between 0 and 300 seconds" unless @timeout.positive? && @timeout <= 300
         @authorization_lock = Mutex.new
+        @request_lock = Mutex.new
+        @active_http = nil
         @closed = false
       rescue ArgumentError, TypeError => error
         raise error if error.message.start_with?("timeout")
@@ -44,7 +46,16 @@ module Thuban
       end
 
       def close
-        @closed = true
+        http = @request_lock.synchronize do
+          @closed = true
+          @active_http
+        end
+        socket = http&.instance_variable_get(:@socket)
+        socket.io.shutdown(Socket::SHUT_RDWR) if socket && !socket.closed?
+        socket.close if socket && !socket.closed?
+        http.finish if http&.started?
+        nil
+      rescue IOError, SystemCallError, OpenSSL::SSL::SSLError
         nil
       end
 
@@ -159,15 +170,21 @@ module Thuban
         endpoint.path = @uri.path.sub(%r{/\z}, "") + suffix
         endpoint.query = query
         http = Net::HTTP.new(endpoint.host, endpoint.port, nil)
+        http.max_retries = 0
         http.use_ssl = endpoint.scheme == "https"
         http.open_timeout = http.read_timeout = @timeout
         http.write_timeout = @timeout if http.respond_to?(:write_timeout=)
+        @request_lock.synchronize do
+          raise TransportError, "connection is closed" if @closed
+          @active_http = http
+        end
         request_headers = headers.merge("Accept-Encoding" => "identity")
         auth = authorization
         request_headers["Authorization"] = auth if auth
         request = (method == :get ? Net::HTTP::Get : Net::HTTP::Post).new(endpoint.request_uri, request_headers)
         request.body = body if body
         received = 0
+        @request_lock.synchronize { raise TransportError, "connection is closed" if @closed }
         http.start do
           http.request(request) do |response|
             validate_response(response, content_type)
@@ -186,6 +203,8 @@ module Thuban
         raise
       rescue Timeout::Error, IOError, SocketError, SystemCallError => error
         raise TransportError, "HTTP transport failed: #{error.class}"
+      ensure
+        @request_lock&.synchronize { @active_http = nil if @active_http.equal?(http) }
       end
 
       def validate_response(response, content_type)

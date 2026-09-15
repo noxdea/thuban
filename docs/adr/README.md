@@ -9,3 +9,4 @@ These records document Thuban's durable boundaries.
 - [005: Transfer Git data over bounded smart HTTP](005-transfer-git-data-over-smart-http.md)
 - [006: Resolve HTTP credentials through explicit providers](006-explicit-http-credentials.md)
 - [007: Delegate SSH transport to the system client](007-delegate-ssh-transport.md)
+- [008: Push through Git receive-pack](008-push-through-receive-pack.md)

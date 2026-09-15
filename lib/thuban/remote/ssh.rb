@@ -35,7 +35,7 @@ module Thuban
 
       def refs
         ensure_open
-        @refs = with_process do |stdin, stdout|
+        @refs = with_process("git-upload-pack") do |stdin, stdout|
           reader = Protocol::Reader.new(stdout, max_bytes: MAX_ADVERTISEMENT_SIZE)
           first = reader.read
           @protocol_version = 0
@@ -56,11 +56,32 @@ module Thuban
 
       private
 
+      def receive_refs
+        return @receive_refs if @receive_refs
+
+        fetch_capabilities = @capabilities
+        begin
+          ensure_open
+          with_process("git-receive-pack") do |stdin, stdout|
+            reader = Protocol::Reader.new(stdout, max_bytes: MAX_ADVERTISEMENT_SIZE)
+            first = reader.read
+            result = read_v0_refs(reader, first)
+            @receive_capabilities = @capabilities
+            stdin.close
+            @receive_refs = result
+          end
+        ensure
+          @capabilities = fetch_capabilities
+        end
+      end
+
       def request_each(method, suffix, query: nil, headers: {}, body: nil, content_type:, limit:)
-        raise TransportError, "invalid SSH request" unless method == :post && suffix == "/git-upload-pack" && query.nil? && body
+        services = {"/git-upload-pack" => "git-upload-pack", "/git-receive-pack" => "git-receive-pack"}
+        service = services[suffix]
+        raise TransportError, "invalid SSH request" unless method == :post && service && query.nil? && body
 
         received = 0
-        with_process(check_status: true) do |stdin, stdout|
+        with_process(service, check_status: true) do |stdin, stdout|
           discard_advertisement(stdout)
           stdin.write(body)
           stdin.close
@@ -83,8 +104,8 @@ module Thuban
         end
       end
 
-      def with_process(check_status: false)
-        process = start_process
+      def with_process(service, check_status: false)
+        process = start_process(service)
         result = Timeout.timeout(@timeout) do
           value = yield(process[:stdin], process[:stdout])
           if check_status
@@ -107,11 +128,11 @@ module Thuban
         cleanup(process)
       end
 
-      def start_process
+      def start_process(service)
         ensure_open
         grouped = !Gem.win_platform?
         options = grouped ? {pgroup: true} : {}
-        stdin, stdout, stderr, waiter = Open3.popen3(process_environment, *command, **options)
+        stdin, stdout, stderr, waiter = Open3.popen3(process_environment, *command(service), **options)
         [stdin, stdout, stderr].each(&:binmode)
         process = {stdin: stdin, stdout: stdout, stderr: stderr, waiter: waiter, grouped: grouped}
         process[:errors] = Thread.new { while stderr.read(4096); end rescue nil }
@@ -125,11 +146,11 @@ module Thuban
         process
       end
 
-      def command
+      def command(service)
         destination = @user ? "#{@user}@#{@host}" : @host
         port = @port ? ["-p", @port.to_s] : []
         @ssh_command + ["-o", "BatchMode=yes", *port, "--", destination,
-          "git-upload-pack #{Shellwords.escape(@path)}"]
+          "#{service} #{Shellwords.escape(@path)}"]
       end
 
       def process_environment

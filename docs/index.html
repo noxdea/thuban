@@ -48,15 +48,14 @@
         <div class="min-w-0">
           <p class="mb-7 inline-flex items-center gap-2 border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm text-neutral-300">
             <span class="size-2 rounded-full bg-git" aria-hidden="true"></span>
-            Version <span class="font-mono tabular-nums">0.1.0</span>
+            Version <span class="font-mono tabular-nums">0.3.0</span>
           </p>
           <h1 class="max-w-3xl text-balance font-display text-5xl font-semibold leading-none text-white sm:text-6xl lg:text-7xl">
             A Git repository, read from first principles.
           </h1>
           <p class="mt-7 max-w-2xl text-pretty text-lg leading-8 text-neutral-400 sm:text-xl">
-            Thuban reads objects, packfiles, refs, the index, status, and blame
-            directly from Ruby. No shelling out. No network operations. A guarded
-            checkout is the only broad write.
+            Thuban reads and writes Git data directly from Ruby, then fetches and
+            pushes local, smart HTTP, and SSH remotes through bounded transports.
           </p>
 
           <div class="mt-10 flex flex-wrap gap-3">
@@ -224,16 +223,16 @@ repo.blame(<span class="text-orange-300">"lib/thuban.rb"</span>)</code></pre>
 
       <section class="border-y border-neutral-800" id="boundaries">
         <div class="mx-auto grid max-w-7xl gap-10 px-5 py-20 sm:px-8 lg:grid-cols-[1fr_1.15fr] lg:items-start lg:gap-20 lg:py-24">
-          <h2 class="max-w-xl text-balance font-display text-3xl font-semibold text-white sm:text-4xl">Local by design, narrow by intent.</h2>
+          <h2 class="max-w-xl text-balance font-display text-3xl font-semibold text-white sm:text-4xl">Narrow by intent.</h2>
           <div>
             <p class="max-w-2xl text-pretty text-lg leading-8 text-neutral-400">
-              Thuban does not fetch, push, rewrite history, or attempt to cover
-              every optional Git extension. It targets SHA-1 repositories and
-              the index and pack formats exercised by its test suite.
+              Thuban reads and writes local repositories, and transfers refs
+              over local, smart HTTP, and SSH remotes. It targets SHA-1 repositories
+              and the index and pack formats exercised by its test suite.
             </p>
             <ul class="mt-8 grid gap-3 text-neutral-300 sm:grid-cols-2">
-              <li class="border-l border-neutral-700 pl-4">No network operations</li>
-              <li class="border-l border-neutral-700 pl-4">No history rewriting</li>
+              <li class="border-l border-neutral-700 pl-4">Bounded remote transfers</li>
+              <li class="border-l border-neutral-700 pl-4">No merge or rebase engine</li>
               <li class="border-l border-neutral-700 pl-4">No submodule checkout</li>
               <li class="border-l border-neutral-700 pl-4">No built-in diff algorithm</li>
             </ul>

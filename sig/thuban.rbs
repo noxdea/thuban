@@ -1,6 +1,7 @@
 module Thuban
   VERSION: String
   type object = [String, String]
+  type push_update = [String, String?, String]
 
   interface _Differ
     def edits: (Porrima::lines, Porrima::lines) -> Array[Porrima::Edit]
@@ -37,6 +38,14 @@ module Thuban
     def self.new: (name: String, oid: String?, ?symref_target: String?, ?peeled: String?) -> instance
   end
 
+  class Progress < Struct[untyped]
+    attr_accessor phase: Symbol
+    attr_accessor current: Integer?
+    attr_accessor total: Integer?
+    attr_accessor bytes: Integer?
+    def self.new: (phase: Symbol, ?current: Integer?, ?total: Integer?, ?bytes: Integer?) -> instance
+  end
+
   module Remote
     type ssh_command = String | Array[String]
     def self.open: (String url, ?credentials: untyped, ?ssh: ssh_command?, ?timeout: Numeric) -> Connection
@@ -53,6 +62,7 @@ module Thuban
       def initialize: (String url, ?credentials: untyped, ?timeout: Numeric) -> void
       def refs: () -> Array[Ref]
       def fetch: (Repository repository, wants: Enumerable[String], ?haves: Enumerable[String], ?depth: nil, ?filter: nil) -> Array[String]
+      def push: (Repository repository, Enumerable[push_update] updates, ?atomic: bool) ?{ (Progress) -> void } -> Array[Ref]
       def close: () -> nil
     end
 
@@ -60,6 +70,10 @@ module Thuban
       MAX_COMMAND_ARGUMENTS: Integer
       MAX_COMMAND_ARGUMENT_SIZE: Integer
       def initialize: (String url, ?credentials: untyped, ?ssh: ssh_command?, ?timeout: Numeric) -> void
+    end
+
+    class LocalConnection < SSHConnection
+      def initialize: (String url, ?credentials: untyped, ?timeout: Numeric) -> void
     end
   end
 
@@ -145,6 +159,7 @@ module Thuban
     def stash_list: () -> Array[Commit]
     def remotes: () -> Hash[String, String]
     def fetch: (?String remote, ?refspecs: String | Enumerable[String]?) -> Array[Ref]
+    def push: (?String remote, refspecs: String | Enumerable[String], ?force: bool, ?lease: String | Hash[String, String]?, ?atomic: bool) ?{ (Progress) -> void } -> Array[Ref]
   end
 
   class ObjectDatabase

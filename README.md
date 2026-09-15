@@ -1,7 +1,7 @@
 <h1 align="center">Thuban</h1>
 
 <p align="center">
-  <strong>A pure Ruby Git implementation for local repositories and remote fetches</strong>
+  <strong>A pure Ruby Git implementation for local repositories and remote transfers</strong>
 </p>
 
 <p align="center">
@@ -23,8 +23,8 @@
 ---
 
 Thuban is a pure Ruby Git implementation for reading and writing local
-repositories and fetching from smart HTTP or SSH remotes. It works directly with Git
-data without invoking the Git executable.
+repositories and transferring data with local, smart HTTP, or SSH remotes. Local
+repository operations work directly with Git data without invoking the Git executable.
 
 ## Features
 
@@ -37,7 +37,8 @@ data without invoking the Git executable.
 - Discovers smart HTTP protocol v2 and v0 remote references
 - Fetches smart HTTP packs into the local object database
 - Authenticates smart HTTP with Basic, Bearer, callbacks, or Git credential helpers
-- Discovers and fetches SSH remotes through the system `ssh` executable
+- Pushes refs and packfiles with force-with-lease and atomic update support
+- Discovers, fetches, and pushes SSH remotes through the system `ssh` executable
 - Tracks line history across commits and renames with blame
 - Writes files atomically and checks out branches with collision guards
 - Supports linked worktrees and packed refs
@@ -270,13 +271,32 @@ repo.remotes # => {"origin" => "https://example.com/project.git"}
 remote_refs = repo.fetch("origin")
 ```
 
+Push one or more explicit refspecs. Normal updates must be fast-forward; use a
+lease for a guarded rewrite, or `force: true` for an unconditional one:
+
+```ruby
+repo.push("origin", refspecs: "refs/heads/main:refs/heads/main")
+repo.push("origin", refspecs: "refs/heads/topic:refs/heads/topic",
+  lease: expected_remote_oid)
+repo.push("origin", refspecs: [
+  "refs/heads/main:refs/heads/main",
+  "refs/tags/v1:refs/tags/v1"
+], atomic: true) { |progress| warn "#{progress.phase}: #{progress.current}/#{progress.total}" }
+```
+
+Remote names, direct paths, `file://` URLs, HTTP(S), and SSH URLs are accepted.
+At the lower level, `Connection#push` accepts `[ref, old_oid, new_oid]` updates;
+the old object ID is an optimistic lease, and `nil` uses the advertised value.
+Deletion uses an empty source refspec such as `:refs/heads/topic`.
+
 Fetched packs are checksum-verified, bounded by byte/object/expanded-size
 limits, and expanded through the existing object database. Redirects,
 URL-embedded credentials, shallow fetches, and partial fetches are rejected until
 their dedicated milestones are implemented.
 
 SSH remotes accept both standard URL and scp-like forms. Thuban invokes the
-system SSH client without a local shell and uses `git-upload-pack` over its
+system SSH client without a local shell and uses `git-upload-pack` or
+`git-receive-pack` over its
 standard input and output:
 
 ```ruby
@@ -319,8 +339,8 @@ continuations, and command-scoped overrides are not evaluated.
 
 The current write API covers loose objects, the index, refs, reflogs, commits,
 guarded checkout, local history operations, stash, and delta-free pack output.
-Thuban can discover and fetch smart HTTP and SSH refs but does not yet push. Merges and
-pack delta generation are also outside the current scope. It does not provide
+Thuban can fetch and push local, smart HTTP, and SSH remotes. Merges, shallow
+and partial fetches, and pack delta generation are outside the current scope. It does not provide
 its own diff algorithm; blame delegates line matching to Porrima through the
 injectable `differ:` argument.
 

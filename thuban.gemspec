@@ -7,7 +7,7 @@ Gem::Specification.new do |spec|
   spec.version = Thuban::VERSION
   spec.authors = ["Yudai Takada"]
   spec.email = ["t.yudai92@gmail.com"]
-  spec.summary = "A pure Ruby Git implementation for local repositories and remote fetches"
+  spec.summary = "A pure Ruby Git implementation for local repositories and remote transfers"
   spec.homepage = "https://github.com/noxdea/thuban"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.1"
