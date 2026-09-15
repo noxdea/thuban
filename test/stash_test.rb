@@ -103,6 +103,33 @@ class StashTest < Minitest::Test
     assert_equal "held", File.binread(log_lock)
   end
 
+  def test_pop_applies_changes_on_top_of_a_new_head
+    write("worktree.txt", "stashed\n")
+    oid = @repository.stash_push
+    write("later.txt", "later commit\n")
+    git("add", "later.txt")
+    git("commit", "-qm", "Later")
+
+    assert_equal oid, @repository.stash_pop
+    assert_equal "later commit\n", File.binread(path("later.txt"))
+    assert_equal "stashed\n", File.binread(path("worktree.txt"))
+    assert_equal " M worktree.txt\n", git("status", "--porcelain=v1")
+  end
+
+  def test_pop_reports_changes_to_the_same_path_as_a_conflict
+    write("worktree.txt", "stashed\n")
+    oid = @repository.stash_push
+    write("worktree.txt", "later commit\n")
+    git("commit", "-qam", "Later")
+    current = @repository.head
+
+    error = assert_raises(ArgumentError) { @repository.stash_pop }
+    assert_match(/conflicts: worktree.txt/, error.message)
+    assert_equal current, @repository.head
+    assert_equal "later commit\n", File.binread(path("worktree.txt"))
+    assert_equal oid, @repository.stash_list.first.oid
+  end
+
   private
 
   def path(relative) = File.join(@directory, relative)

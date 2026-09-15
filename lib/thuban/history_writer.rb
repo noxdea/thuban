@@ -75,6 +75,19 @@ module Thuban
       raise ArgumentError, "cannot apply a commit on an unborn branch" unless current_oid
 
       current = tree(current_oid)
+      result = apply_tree_change(base, incoming, current, action)
+      raise ArgumentError, "#{action} is empty" if same_tree?(current, result)
+
+      tree_oid = write_tree_from_entries(result.values)
+      commit_oid = write_commit(tree: tree_oid, parents: [current_oid], author: author,
+        committer: operation_signature, message: message)
+      RefStore.new(self).update("HEAD", commit_oid, old_oid: current_oid,
+        message: "#{action}: #{source.message.lines.first.to_s.strip}") do
+        replace_repository_state(result, result)
+      end
+    end
+
+    def apply_tree_change(base, incoming, current, action)
       result = current.dup
       conflicts = []
       (base.keys | incoming.keys).each do |path|
@@ -88,15 +101,7 @@ module Thuban
         end
       end
       raise ArgumentError, "#{action} conflicts: #{conflicts.sort.join(', ')}" unless conflicts.empty?
-      raise ArgumentError, "#{action} is empty" if same_tree?(current, result)
-
-      tree_oid = write_tree_from_entries(result.values)
-      commit_oid = write_commit(tree: tree_oid, parents: [current_oid], author: author,
-        committer: operation_signature, message: message)
-      RefStore.new(self).update("HEAD", commit_oid, old_oid: current_oid,
-        message: "#{action}: #{source.message.lines.first.to_s.strip}") do
-        replace_repository_state(result, result)
-      end
+      result
     end
 
     def same_tree?(left, right)

@@ -47,10 +47,20 @@ module Thuban
       oid = record_oid(records.fetch(position))
       stored = require_commit(oid)
       raise CorruptObject, "invalid stash commit" unless stored.parents.length >= 2
+      current_head = head
+      raise ArgumentError, "cannot pop a stash on an unborn branch" unless current_head
 
-      worktree_tree = tree(stored.oid)
-      worktree_tree = worktree_tree.merge(tree(stored.parents[2])) if stored.parents[2]
-      index_tree = tree(stored.parents[1])
+      base_tree = tree(stored.parents[0])
+      stored_index = tree(stored.parents[1])
+      index_tree = apply_tree_change(base_tree, stored_index, tree(current_head), "stash pop")
+      worktree_tree = apply_tree_change(stored_index, tree(stored.oid), index_tree, "stash pop")
+      if stored.parents[2]
+        untracked_tree = tree(stored.parents[2])
+        collisions = untracked_tree.keys & worktree_tree.keys
+        raise ArgumentError, "stash pop conflicts: #{collisions.sort.join(', ')}" unless collisions.empty?
+
+        worktree_tree = worktree_tree.merge(untracked_tree)
+      end
       drop_stash(records, position) { replace_repository_state(worktree_tree, index_tree) }
       oid
     end
