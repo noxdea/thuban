@@ -112,25 +112,18 @@ module Thuban
 
     def with_locks(paths)
       locks = {}
-      identities = {}
       paths.uniq.sort.each do |path|
         prepare_storage_path(path)
         file = File.open(path + ".lock", File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
         locks[path] = file
-        identities[path] = [file.stat.dev, file.stat.ino]
       end
       yield locks
     rescue Errno::EEXIST => error
       raise RefLockError, "reference is locked: #{error.message}"
     ensure
-      locks&.each do |path, file|
+      locks&.each_value do |file|
         file.close unless file.closed?
-        begin
-          stat = File.lstat(file.path)
-          File.unlink(file.path) if identities[path] == [stat.dev, stat.ino]
-        rescue Errno::ENOENT
-          nil
-        end
+        File.unlink(file.path) if File.exist?(file.path)
       end
     end
 
