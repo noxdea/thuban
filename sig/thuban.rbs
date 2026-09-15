@@ -10,6 +10,10 @@ module Thuban
     def write: (String) -> Integer
   end
 
+  interface _PackInput
+    def read: (Integer) -> String?
+  end
+
   class CorruptObject < StandardError
   end
 
@@ -39,6 +43,7 @@ module Thuban
     class Connection
       def initialize: (String url, ?timeout: Numeric) -> void
       def refs: () -> Array[Ref]
+      def fetch: (Repository repository, wants: Enumerable[String], ?haves: Enumerable[String], ?depth: nil, ?filter: nil) -> Array[String]
       def close: () -> nil
     end
   end
@@ -123,6 +128,8 @@ module Thuban
     def stash_push: (?message: String?, ?include_untracked: bool) -> String?
     def stash_pop: (?Integer index) -> String
     def stash_list: () -> Array[Commit]
+    def remotes: () -> Hash[String, String]
+    def fetch: (?String remote, ?refspecs: String | Enumerable[String]?) -> Array[Ref]
   end
 
   class ObjectDatabase
@@ -155,6 +162,7 @@ module Thuban
     def read: (String oid) ?{ (String) -> object } -> object
     def self.apply_delta: (String base, String delta) -> String
     def self.write: (_PackOutput io, Enumerable[object] objects) ?{ (Integer current, Integer total) -> void } -> String
+    def self.read_stream: (_PackInput io, ObjectDatabase odb) ?{ (Integer current, Integer total) -> void } -> Array[String]
   end
 
   class Index

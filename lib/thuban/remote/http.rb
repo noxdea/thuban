@@ -13,7 +13,6 @@ module Thuban
         @uri = parse_url(url)
         @timeout = Float(timeout)
         raise ArgumentError, "timeout must be between 0 and 300 seconds" unless @timeout.positive? && @timeout <= 300
-
         @closed = false
       rescue ArgumentError, TypeError => error
         raise error if error.message.start_with?("timeout")
@@ -27,10 +26,11 @@ module Thuban
           headers: {"Accept" => "application/x-git-upload-pack-advertisement", "Git-Protocol" => "version=2"},
           content_type: "application/x-git-upload-pack-advertisement", limit: MAX_ADVERTISEMENT_SIZE)
         reader = Protocol::Reader.new(StringIO.new(body), max_bytes: MAX_ADVERTISEMENT_SIZE)
-        service = reader.read
-        raise TransportError, "invalid upload-pack advertisement" unless service == "# service=git-upload-pack\n" && reader.read == Protocol::FLUSH
-
         first = reader.read
+        if first == "# service=git-upload-pack\n"
+          raise TransportError, "invalid upload-pack advertisement" unless reader.read == Protocol::FLUSH
+          first = reader.read
+        end
         @refs = if first == "version 2\n"
           @protocol_version = 2
           read_v2_refs(reader)
@@ -88,7 +88,6 @@ module Thuban
           break if [Protocol::FLUSH, Protocol::RESPONSE_END].include?(packet)
           raise TransportError, "truncated ls-refs response" unless packet.is_a?(String)
           raise TransportError, packet.delete_prefix("ERR ").strip if packet.start_with?("ERR ")
-
           fields = packet.chomp.split(" ")
           oid = fields.shift
           name = Protocol.validate_ref(fields.shift)
@@ -145,6 +144,14 @@ module Thuban
       end
 
       def request(method, suffix, query: nil, headers: {}, body: nil, content_type:, limit:)
+        result = +"".b
+        request_each(method, suffix, query: query, headers: headers, body: body, content_type: content_type, limit: limit) do |chunk|
+          result << chunk
+        end
+        result
+      end
+
+      def request_each(method, suffix, query: nil, headers: {}, body: nil, content_type:, limit:)
         endpoint = @uri.dup
         endpoint.path = @uri.path.sub(%r{/\z}, "") + suffix
         endpoint.query = query
@@ -154,18 +161,21 @@ module Thuban
         http.write_timeout = @timeout if http.respond_to?(:write_timeout=)
         request = (method == :get ? Net::HTTP::Get : Net::HTTP::Post).new(endpoint.request_uri, headers.merge("Accept-Encoding" => "identity"))
         request.body = body if body
-        response_body = +"".b
+        received = 0
         http.start do
           http.request(request) do |response|
             validate_response(response, content_type)
+            declared = response["content-length"]
+            raise TransportError, "HTTP response exceeds size limit" if declared&.match?(/\A\d+\z/) && declared.to_i > limit
             response.read_body do |chunk|
-              raise TransportError, "HTTP response exceeds size limit" if response_body.bytesize + chunk.bytesize > limit
+              received += chunk.bytesize
+              raise TransportError, "HTTP response exceeds size limit" if received > limit
 
-              response_body << chunk
+              yield chunk
             end
           end
         end
-        response_body
+        received
       rescue TransportError, AuthenticationError
         raise
       rescue Timeout::Error, IOError, SocketError, SystemCallError => error

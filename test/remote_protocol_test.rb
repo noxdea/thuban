@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
-require "socket"
+require_relative "support/http_fixture"
 require "stringio"
 
 class RemoteProtocolTest < Minitest::Test
@@ -99,55 +99,27 @@ class RemoteProtocolTest < Minitest::Test
     assert_equal "repository unavailable", error.message
   end
 
+  def test_enforces_http_timeout_authentication_and_declared_size
+    @server = HTTPFixture.new do
+      sleep 0.1
+      [200, "application/x-git-upload-pack-advertisement", ""]
+    end
+    assert_raises(Thuban::TransportError) { Thuban::Remote.open(@server.url, timeout: 0.01).refs }
+    @server.close
+
+    @server = HTTPFixture.new { [401, "text/plain", "secret details"] }
+    error = assert_raises(Thuban::AuthenticationError) { Thuban::Remote.open(@server.url).refs }
+    refute_includes error.message, "secret"
+    @server.close
+
+    too_large = (Thuban::Remote::Connection::MAX_ADVERTISEMENT_SIZE + 1).to_s
+    @server = HTTPFixture.new { [200, "application/x-git-upload-pack-advertisement", "", {"Content-Length" => too_large}] }
+    assert_raises(Thuban::TransportError) { Thuban::Remote.open(@server.url).refs }
+  end
+
   private
 
   def packets(*lines) = lines.map { |line| Protocol.packet(line) }.join
   def service_advertisement(*lines) = Protocol.packet("# service=git-upload-pack\n") + Protocol.flush + packets(*lines) + Protocol.flush
 
-  class HTTPFixture
-    attr_reader :url
-
-    def initialize(&handler)
-      @handler = handler
-      @socket = TCPServer.new("127.0.0.1", 0)
-      @url = "http://127.0.0.1:#{@socket.local_address.ip_port}/repo.git"
-      @thread = Thread.new { serve }
-    end
-
-    def close
-      @socket.close unless @socket.closed?
-      @thread.join
-      raise @error if @error
-    end
-
-    private
-
-    def serve
-      client = nil
-      loop do
-        client = @socket.accept
-        request_line = client.gets("\r\n")
-        next client.close unless request_line
-
-        method, path, = request_line.split(" ")
-        headers = {}
-        while (line = client.gets("\r\n")) && line != "\r\n"
-          name, value = line.split(":", 2)
-          headers[name.downcase] = value.to_s.strip
-        end
-        body = client.read(headers.fetch("content-length", "0").to_i)
-        status, type, response = @handler.call(method: method, path: path, headers: headers, body: body)
-        reason = status == 200 ? "OK" : "Response"
-        client.write("HTTP/1.1 #{status} #{reason}\r\nContent-Type: #{type}\r\nContent-Length: #{response.bytesize}\r\nConnection: close\r\n\r\n")
-        client.write(response)
-        client.close
-      end
-    rescue IOError, Errno::EBADF
-      nil
-    rescue StandardError => error
-      @error = error
-    ensure
-      client&.close unless client&.closed?
-    end
-  end
 end

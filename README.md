@@ -1,7 +1,7 @@
 <h1 align="center">Thuban</h1>
 
 <p align="center">
-  <strong>A pure Ruby implementation for local Git repositories</strong>
+  <strong>A pure Ruby Git implementation for local repositories and smart HTTP fetches</strong>
 </p>
 
 <p align="center">
@@ -23,8 +23,8 @@
 ---
 
 Thuban is a pure Ruby Git implementation for reading and writing local
-repositories. It works directly with repository data without invoking the Git
-executable.
+repositories and fetching from smart HTTP remotes. It works directly with Git
+data without invoking the Git executable.
 
 ## Features
 
@@ -35,6 +35,7 @@ executable.
 - Finds merge bases and performs reset, cherry-pick, revert, and stash operations
 - Writes interoperable delta-free Git packfiles to any writable IO
 - Discovers smart HTTP protocol v2 and v0 remote references
+- Fetches smart HTTP packs into the local object database
 - Tracks line history across commits and renames with blame
 - Writes files atomically and checks out branches with collision guards
 - Supports linked worktrees and packed refs
@@ -44,7 +45,7 @@ executable.
 Add Thuban to your Gemfile:
 
 ```ruby
-gem "thuban", "~> 0.2.0"
+gem "thuban", "~> 0.3.0"
 ```
 
 Then install it:
@@ -195,6 +196,8 @@ end
 
 The emitted PACK v2 stream stores complete compressed objects without delta
 generation. It can be consumed by `git index-pack` and `git verify-pack`.
+`Thuban::Pack.read_stream(io, repo.odb)` verifies and expands a received pack,
+including offset and reference deltas, into the supplied object database.
 
 ### Inspect Remote References
 
@@ -211,9 +214,28 @@ ensure
 end
 ```
 
-The current transport accepts unauthenticated HTTP(S) URLs only. Redirects,
-URL-embedded credentials, SSH, and explicit credentials are rejected until the
-corresponding authentication and SSH milestones define their handling.
+Fetch selected object IDs directly, optionally providing local object IDs for
+negotiation:
+
+```ruby
+wanted = connection.refs.find { |ref| ref.name == "refs/heads/main" }.oid
+received_oids = connection.fetch(repo, wants: [wanted], haves: repo.refs.values.compact)
+```
+
+For a repository with a normal `[remote "origin"]` configuration, the
+high-level operation reads its fetch refspec and updates remote-tracking refs:
+
+```ruby
+repo.remotes # => {"origin" => "https://example.com/project.git"}
+remote_refs = repo.fetch("origin")
+```
+
+Fetched packs are checksum-verified, bounded by byte/object/expanded-size
+limits, and expanded through the existing object database. The current
+transport accepts unauthenticated HTTP(S) URLs only. Redirects, URL-embedded
+credentials, SSH, and explicit credentials are rejected until the corresponding
+authentication and SSH milestones define their handling. Shallow and partial
+fetch options are present but rejected until their milestone is implemented.
 
 ### Match Ignored Paths
 
@@ -236,10 +258,10 @@ continuations, and command-scoped overrides are not evaluated.
 
 The current write API covers loose objects, the index, refs, reflogs, commits,
 guarded checkout, local history operations, stash, and delta-free pack output.
-Thuban can discover smart HTTP refs but does not yet fetch or push. Merges, pack
-delta generation, and streaming pack ingestion are also outside the current
-scope. It does not provide its own diff algorithm; blame delegates line
-matching to Porrima through the injectable `differ:` argument.
+Thuban can discover and fetch smart HTTP refs but does not yet push. Merges and
+pack delta generation are also outside the current scope. It does not provide
+its own diff algorithm; blame delegates line matching to Porrima through the
+injectable `differ:` argument.
 
 Support is limited to the index and pack formats covered by the test suite.
 Submodule checkout and optional Git extensions outside that coverage are not
