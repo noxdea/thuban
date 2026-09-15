@@ -53,18 +53,18 @@ class RemoteSSHTest < Minitest::Test
   end
 
   def test_ssh_uri_passes_user_host_and_port_as_separate_arguments
-    connection = Thuban::Remote.open("ssh://fixture@localhost:2222#{@remote}", ssh: ruby_fake_ssh)
+    connection = Thuban::Remote.open(ssh_uri(port: 2222), ssh: ruby_fake_ssh)
     assert_equal @head, connection.refs.find { |ref| ref.name == "refs/heads/main" }.oid
 
     arguments = JSON.parse(File.readlines(@log, chomp: true).last)
     assert_equal ["-o", "BatchMode=yes", "-p", "2222", "--", "fixture@localhost"], arguments[0, 6]
-    assert_equal ["git-upload-pack", @remote], Shellwords.split(arguments.fetch(6))
+    assert_equal ["git-upload-pack", ssh_uri_path], Shellwords.split(arguments.fetch(6))
   ensure
     connection&.close
   end
 
   def test_ssh_uri_scheme_is_case_insensitive
-    connection = Thuban::Remote.open("SSH://fixture@localhost#{@remote}", ssh: ruby_fake_ssh)
+    connection = Thuban::Remote.open(ssh_uri(scheme: "SSH"), ssh: ruby_fake_ssh)
 
     assert_equal @head, connection.refs.find { |ref| ref.name == "refs/heads/main" }.oid
   ensure
@@ -160,6 +160,7 @@ class RemoteSSHTest < Minitest::Test
 
     noisy = File.join(@directory, "noisy.rb")
     File.binwrite(noisy, <<~'RUBY')
+      STDOUT.binmode
       warn "stderr-secret"
       payload = "ERR ssh://user@host/secret.git\n"
       STDOUT.write(format("%04x", payload.bytesize + 4) + payload + "0000")
@@ -219,6 +220,15 @@ class RemoteSSHTest < Minitest::Test
 
   def ruby_fake_ssh = [RbConfig.ruby, @fake_ssh]
 
+  def ssh_uri(port: nil, scheme: "ssh")
+    "#{scheme}://fixture@localhost#{":#{port}" if port}#{ssh_uri_path}"
+  end
+
+  def ssh_uri_path
+    path = @remote.tr("\\", "/")
+    path.start_with?("/") ? path : "/#{path}"
+  end
+
   def write_fake_ssh
     File.binwrite(@fake_ssh, <<~'RUBY')
       require "json"
@@ -227,7 +237,9 @@ class RemoteSSHTest < Minitest::Test
       File.open(ENV.fetch("THUBAN_SSH_LOG"), "a") { |file| file.puts(JSON.generate(ARGV)) }
       command = Shellwords.split(ARGV.fetch(-1))
       abort "unexpected command" unless command.length == 2 && command.first == "git-upload-pack"
-      exec("git-upload-pack", command.last)
+      path = command.last
+      path = path.delete_prefix("/") if Gem.win_platform? && path.match?(/\A\/[A-Za-z]:\//)
+      exec("git-upload-pack", path)
     RUBY
   end
 
