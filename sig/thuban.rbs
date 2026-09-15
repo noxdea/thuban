@@ -119,13 +119,20 @@ module Thuban
       def self.new: (path: String, oid: String, mode: Integer, size: Integer, mtime: Integer, mtime_nsec: Integer, ctime: Integer, ctime_nsec: Integer, dev: Integer, ino: Integer, uid: Integer, gid: Integer, stage: Integer, ?flags: Integer?, ?extended_flags: Integer?) -> instance
     end
     attr_reader entries: Array[Entry]
+    attr_reader extensions: Array[String]
     attr_reader version: Integer
     attr_reader path: String
     def initialize: (String path) -> void
     def each: () -> Enumerator[Entry, Array[Entry]]
             | () { (Entry) -> void } -> Array[Entry]
     def []: (String path) -> Entry?
-    def self.encode: (Array[Entry] entries) -> String
+    def self.encode: (Array[Entry] entries, ?extensions: Array[String], ?version: Integer) -> String
+    def write: () -> Index
+    def stage: (String path, String oid, Integer mode, ?stat: File::Stat | Hash[Symbol, untyped]?) -> Entry
+    def unstage: (String path) -> Array[Entry]
+    def remove: (String path) -> Array[Entry]
+    def conflicts: () -> Array[Entry]
+    def resolve: (String path, String oid, Integer mode) -> Entry
   end
 
   class Status
