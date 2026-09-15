@@ -85,6 +85,10 @@ module Thuban
     def reflog: (String name) -> Array[String]
     def write_tree_from_index: () -> String
     def commit!: (message: String, author: Signature, ?amend: bool) -> String
+    def merge_base: (String a, String b) -> String?
+    def reset: (String oid, ?mode: :soft | :mixed | :hard) -> String
+    def cherry_pick: (String oid) -> String
+    def revert: (String oid) -> String
   end
 
   class ObjectDatabase
