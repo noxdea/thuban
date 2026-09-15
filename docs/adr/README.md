@@ -10,3 +10,4 @@ These records document Thuban's durable boundaries.
 - [006: Resolve HTTP credentials through explicit providers](006-explicit-http-credentials.md)
 - [007: Delegate SSH transport to the system client](007-delegate-ssh-transport.md)
 - [008: Push through Git receive-pack](008-push-through-receive-pack.md)
+- [009: Keep shallow and partial fetch state Git-compatible](009-git-compatible-shallow-and-partial-fetches.md)

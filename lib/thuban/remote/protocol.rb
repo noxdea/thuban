@@ -24,6 +24,20 @@ module Thuban
         oid.downcase
       end
 
+      def self.validate_depth(depth)
+        return if depth.nil?
+        raise ArgumentError, "depth must be an Integer between 1 and 2147483647" unless depth.is_a?(Integer) && (1..2_147_483_647).cover?(depth)
+
+        depth
+      end
+
+      def self.validate_filter(filter)
+        return if filter.nil?
+        raise ArgumentError, "filter must be blob:none" unless filter == "blob:none"
+
+        filter
+      end
+
       def self.validate_ref(name)
         valid = name == "HEAD" || (name.is_a?(String) && name.start_with?("refs/") &&
           !name.end_with?("/", ".") && !name.include?("..") && !name.include?("@{") &&

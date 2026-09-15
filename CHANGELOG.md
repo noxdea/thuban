@@ -8,6 +8,7 @@
 - Add redacted Basic, Bearer, callback, and Git credential-helper authentication
 - Add bounded SSH ref discovery and fetch through the system SSH client
 - Add local, smart HTTP, and SSH push with refspecs, leases, atomic updates, and progress
+- Add fetch progress, shallow depth negotiation, and `blob:none` partial fetches
 
 ## 0.3.0 - 2026-09-15
 

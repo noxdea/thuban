@@ -227,11 +227,13 @@ repo.blame(<span class="text-orange-300">"lib/thuban.rb"</span>)</code></pre>
           <div>
             <p class="max-w-2xl text-pretty text-lg leading-8 text-neutral-400">
               Thuban reads and writes local repositories, and transfers refs
-              over local, smart HTTP, and SSH remotes. It targets SHA-1 repositories
+              over local, smart HTTP, and SSH remotes. Fetches can report progress,
+              limit history depth, or omit blobs. It targets SHA-1 repositories
               and the index and pack formats exercised by its test suite.
             </p>
             <ul class="mt-8 grid gap-3 text-neutral-300 sm:grid-cols-2">
               <li class="border-l border-neutral-700 pl-4">Bounded remote transfers</li>
+              <li class="border-l border-neutral-700 pl-4">Shallow and blobless fetches</li>
               <li class="border-l border-neutral-700 pl-4">No merge or rebase engine</li>
               <li class="border-l border-neutral-700 pl-4">No submodule checkout</li>
               <li class="border-l border-neutral-700 pl-4">No built-in diff algorithm</li>

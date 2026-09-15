@@ -61,7 +61,7 @@ module Thuban
     class Connection
       def initialize: (String url, ?credentials: untyped, ?timeout: Numeric) -> void
       def refs: () -> Array[Ref]
-      def fetch: (Repository repository, wants: Enumerable[String], ?haves: Enumerable[String], ?depth: nil, ?filter: nil) -> Array[String]
+      def fetch: (Repository repository, wants: Enumerable[String], ?haves: Enumerable[String], ?depth: Integer?, ?filter: String?) ?{ (Progress) -> void } -> Array[String]
       def push: (Repository repository, Enumerable[push_update] updates, ?atomic: bool) ?{ (Progress) -> void } -> Array[Ref]
       def close: () -> nil
     end
@@ -158,7 +158,7 @@ module Thuban
     def stash_pop: (?Integer index) -> String
     def stash_list: () -> Array[Commit]
     def remotes: () -> Hash[String, String]
-    def fetch: (?String remote, ?refspecs: String | Enumerable[String]?) -> Array[Ref]
+    def fetch: (?String remote, ?refspecs: String | Enumerable[String]?, ?depth: Integer?, ?filter: String?) ?{ (Progress) -> void } -> Array[Ref]
     def push: (?String remote, refspecs: String | Enumerable[String], ?force: bool, ?lease: String | Hash[String, String]?, ?atomic: bool) ?{ (Progress) -> void } -> Array[Ref]
   end
 

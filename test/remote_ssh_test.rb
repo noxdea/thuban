@@ -52,6 +52,26 @@ class RemoteSSHTest < Minitest::Test
     connection&.close
   end
 
+  def test_ssh_fetch_negotiates_shallow_and_partial_history
+    File.binwrite(File.join(@source, "file.txt"), "newer\n")
+    git_in(@source, "commit", "-qam", "Newer")
+    head = git_in(@source, "rev-parse", "HEAD").strip
+    parent = git_in(@source, "rev-parse", "HEAD^").strip
+    blob = git_in(@source, "rev-parse", "HEAD:file.txt").strip
+    git_in(@source, "push", "-q", @remote, "main")
+    git_in(@remote, "config", "uploadpack.allowFilter", "true")
+    connection = Thuban::Remote.open("fixture@localhost:#{@remote}", ssh: ruby_fake_ssh)
+
+    connection.fetch(@repository, wants: [head], depth: 1, filter: "blob:none")
+
+    assert @repository.odb.exist?(head)
+    refute @repository.odb.exist?(parent)
+    refute @repository.odb.exist?(blob)
+    assert_equal "#{head}\n", File.binread(File.join(@repository.common_dir, "shallow"))
+  ensure
+    connection&.close
+  end
+
   def test_ssh_uri_passes_user_host_and_port_as_separate_arguments
     connection = Thuban::Remote.open(ssh_uri(port: 2222), ssh: ruby_fake_ssh)
     assert_equal @head, connection.refs.find { |ref| ref.name == "refs/heads/main" }.oid

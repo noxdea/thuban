@@ -271,6 +271,24 @@ repo.remotes # => {"origin" => "https://example.com/project.git"}
 remote_refs = repo.fetch("origin")
 ```
 
+Limit downloaded history or omit blobs while reporting bounded transfer and pack
+progress:
+
+```ruby
+repo.fetch("origin", depth: 1) { |event| warn "#{event.phase}: #{event.bytes}" }
+repo.fetch("origin", filter: "blob:none")
+```
+
+`depth:` accepts positive 32-bit integers and `filter:` currently accepts only
+`"blob:none"`. Thuban negotiates only features advertised by the server. Shallow
+boundaries are atomically maintained in Git's `shallow` file. For configured
+remotes, partial fetches also set Git's `remote.<name>.promisor` and
+`remote.<name>.partialclonefilter` keys, so the Git executable can retrieve an
+omitted object later. Reading an omitted blob through Thuban raises `KeyError`;
+automatic promisor-object retrieval remains the caller's responsibility.
+Progress `bytes` are cumulative for `:pack` events and the current sideband
+message size for `:remote` events, matching push progress.
+
 Push one or more explicit refspecs. Normal updates must be fast-forward; use a
 lease for a guarded rewrite, or `force: true` for an unconditional one:
 
@@ -290,9 +308,8 @@ the old object ID is an optimistic lease, and `nil` uses the advertised value.
 Deletion uses an empty source refspec such as `:refs/heads/topic`.
 
 Fetched packs are checksum-verified, bounded by byte/object/expanded-size
-limits, and expanded through the existing object database. Redirects,
-URL-embedded credentials, shallow fetches, and partial fetches are rejected until
-their dedicated milestones are implemented.
+limits, and expanded through the existing object database. Redirects and
+URL-embedded credentials remain rejected.
 
 SSH remotes accept both standard URL and scp-like forms. Thuban invokes the
 system SSH client without a local shell and uses `git-upload-pack` or
@@ -315,8 +332,8 @@ connection = Thuban::Remote.open(remote_url, ssh: ["ssh", "-F", "/safe/config"])
 SSH runs in batch mode, is bounded by `timeout:`, and discards stderr so remote
 paths and server diagnostics are not copied into exceptions. User, host, port,
 and path syntax is validated before process startup. Passwords in SSH URLs are
-not supported; use normal SSH agents and configuration instead. Shallow and
-partial fetch options are present but rejected until their milestone is implemented.
+not supported; use normal SSH agents and configuration instead. SSH fetches use
+the same shallow, partial, sideband progress, and pack validation paths as HTTP.
 
 ### Match Ignored Paths
 
@@ -339,8 +356,9 @@ continuations, and command-scoped overrides are not evaluated.
 
 The current write API covers loose objects, the index, refs, reflogs, commits,
 guarded checkout, local history operations, stash, and delta-free pack output.
-Thuban can fetch and push local, smart HTTP, and SSH remotes. Merges, shallow
-and partial fetches, and pack delta generation are outside the current scope. It does not provide
+Thuban can fetch and push local, smart HTTP, and SSH remotes, including shallow
+and blobless fetches. Merges, automatic retrieval of omitted promisor objects,
+and pack delta generation are outside the current scope. It does not provide
 its own diff algorithm; blame delegates line matching to Porrima through the
 injectable `differ:` argument.
 

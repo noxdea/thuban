@@ -6,11 +6,14 @@ module Thuban
       remote_settings.transform_values { |settings| settings[:url] }.compact
     end
 
-    def fetch(remote = "origin", refspecs: nil)
+    def fetch(remote = "origin", refspecs: nil, depth: nil, filter: nil)
+      depth = Remote::Protocol.validate_depth(depth)
+      filter = Remote::Protocol.validate_filter(filter)
       settings = remote_settings[remote]
-      direct = remote.to_s.match?(/\A(?:https?|ssh):\/\//i) || (!remote.to_s.include?("://") && remote.to_s.include?(":"))
+      direct = direct_remote?(remote)
       url = settings&.fetch(:url, nil) || (remote if direct)
       raise ArgumentError, "unknown remote: #{remote}" unless url
+      url = normalize_remote_url(url)
 
       specs = refspecs
       if specs.nil? && settings
@@ -25,7 +28,10 @@ module Thuban
       previous = updates.filter_map { |_, destination| [destination, resolve(destination)] if destination }.to_h
       unless wants.empty?
         haves = refs.values.compact.uniq.select { |oid| odb.exist?(oid) }
-        connection.fetch(self, wants: wants, haves: haves)
+        connection.fetch(self, wants: wants, haves: haves, depth: depth, filter: filter) do |progress|
+          yield progress if block_given?
+        end
+        record_promisor(remote, filter) if filter && settings
         updates.each do |ref, destination|
           update_ref(destination, ref.oid, old_oid: previous.fetch(destination), message: "fetch #{remote}: #{ref.name}") if destination && ref.oid
         end
@@ -40,6 +46,7 @@ module Thuban
       direct = direct_remote?(remote)
       url = settings&.fetch(:pushurl, nil) || settings&.fetch(:url, nil) || (remote if direct)
       raise ArgumentError, "unknown remote: #{remote}" unless url
+      url = normalize_remote_url(url)
       raise ArgumentError, "force must be true or false" unless [true, false].include?(force)
       raise ArgumentError, "atomic must be true or false" unless [true, false].include?(atomic)
 
@@ -56,7 +63,13 @@ module Thuban
     def direct_remote?(remote)
       value = remote.to_s
       value.match?(/\A(?:https?|ssh|file):\/\//i) || (!value.include?("://") && value.include?(":")) ||
-        value.start_with?("/", "./", "../", "~") || File.exist?(File.expand_path(value, root || Dir.pwd))
+        value.start_with?("/", "./", "../", "~") || File.exist?(File.expand_path(value, root || common_dir))
+    end
+
+    def normalize_remote_url(url)
+      local = !url.include?("://") && (url.start_with?("/", "./", "../", "~") ||
+        !url.include?(":") || url.match?(/\A[A-Za-z]:[\\\/]/))
+      local ? File.expand_path(url, root || common_dir) : url
     end
 
     def remote_settings
@@ -78,6 +91,31 @@ module Thuban
       result
     rescue Errno::ENOENT, Errno::EACCES
       {}
+    end
+
+    def record_promisor(remote, filter)
+      path = File.join(common_dir, "config")
+      raise ArgumentError, "unsafe Git config" if File.symlink?(path) || File.symlink?(path + ".lock")
+      lock = File.open(path + ".lock", File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
+      lines = File.readlines(path, mode: "rb")
+      start = lines.index { |line| line.strip.match?(/\A\[remote\s+"#{Regexp.escape(remote)}"\]\z/i) }
+      raise RefLockError, "remote configuration changed during fetch" unless start
+
+      finish = ((start + 1)...lines.length).find { |index| lines[index].lstrip.start_with?("[") } || lines.length
+      body = lines[(start + 1)...finish].reject { |line| line.strip.match?(/\A(?:promisor|partialclonefilter)\s*=/i) }
+      body[-1] = body[-1] + "\n" if body.any? && !body[-1].end_with?("\n")
+      body << "\tpromisor = true\n" << "\tpartialclonefilter = #{filter}\n"
+      lock.chmod(File.stat(path).mode & 0o777)
+      lock.write((lines[0..start] + body + lines[finish..].to_a).join)
+      lock.flush
+      lock.fsync
+      lock.close
+      File.rename(lock.path, path)
+    rescue Errno::EEXIST
+      raise RefLockError, "Git config is locked"
+    ensure
+      lock&.close unless lock&.closed?
+      File.unlink(lock.path) if lock && File.exist?(lock.path)
     end
 
     def normalize_fetch_refspecs(refspecs)
