@@ -90,7 +90,7 @@ module Thuban
           packet = reader.read
           break if [Protocol::FLUSH, Protocol::RESPONSE_END].include?(packet)
           raise TransportError, "truncated ls-refs response" unless packet.is_a?(String)
-          raise TransportError, packet.delete_prefix("ERR ").strip if packet.start_with?("ERR ")
+          raise TransportError, safe_message(packet.delete_prefix("ERR ")) if packet.start_with?("ERR ")
           fields = packet.chomp.split(" ")
           oid = fields.shift
           name = Protocol.validate_ref(fields.shift)
@@ -124,7 +124,7 @@ module Thuban
         result = []
         peeled = {}
         lines.each do |line|
-          raise TransportError, line.delete_prefix("ERR ").strip if line.start_with?("ERR ")
+          raise TransportError, safe_message(line.delete_prefix("ERR ")) if line.start_with?("ERR ")
 
           oid, name = line.chomp.split(" ", 2)
           next if oid == "0" * 40 && name == "capabilities^{}"

@@ -124,13 +124,19 @@ module Thuban
         end
 
         def terminate(waiter, grouped)
-          target = grouped ? -waiter.pid : waiter.pid
+          unless grouped
+            Process.kill("KILL", waiter.pid)
+            waiter.join
+            return
+          end
+
+          target = -waiter.pid
           Process.kill("TERM", target)
           return if waiter.join(0.2)
 
           Process.kill("KILL", target)
           waiter.join
-        rescue Errno::ESRCH, Errno::ECHILD
+        rescue SystemCallError
           nil
         end
 

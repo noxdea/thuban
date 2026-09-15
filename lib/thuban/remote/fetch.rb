@@ -95,7 +95,7 @@ module Thuban
           break if packet.nil? || [Protocol::FLUSH, Protocol::RESPONSE_END].include?(packet)
           next if packet == Protocol::DELIMITER
           raise TransportError, "invalid fetch response" unless packet.is_a?(String)
-          raise TransportError, packet.delete_prefix("ERR ").strip if packet.start_with?("ERR ")
+          raise TransportError, safe_message(packet.delete_prefix("ERR ")) if packet.start_with?("ERR ")
 
           if packet == "packfile\n"
             packfile = true

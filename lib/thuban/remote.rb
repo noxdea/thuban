@@ -9,7 +9,10 @@ module Thuban
 
   module Remote
     def self.open(url, credentials: nil, ssh: nil, timeout: 30)
-      raise TransportError, "SSH transport is not supported yet" if ssh
+      if url.is_a?(String) && (url.match?(/\Assh:\/\//i) || (!url.include?("://") && url.include?(":")))
+        return SSHConnection.new(url, credentials: credentials, ssh: ssh, timeout: timeout)
+      end
+      raise ArgumentError, "ssh configuration requires an SSH remote" if ssh
 
       Connection.new(url, credentials: credentials, timeout: timeout)
     end

@@ -8,7 +8,8 @@ module Thuban
 
     def fetch(remote = "origin", refspecs: nil)
       settings = remote_settings[remote]
-      url = settings&.fetch(:url, nil) || (remote if remote.to_s.match?(/\Ahttps?:\/\//))
+      direct = remote.to_s.match?(/\A(?:https?|ssh):\/\//i) || (!remote.to_s.include?("://") && remote.to_s.include?(":"))
+      url = settings&.fetch(:url, nil) || (remote if direct)
       raise ArgumentError, "unknown remote: #{remote}" unless url
 
       specs = refspecs

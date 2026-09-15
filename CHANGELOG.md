@@ -6,6 +6,7 @@
 - Add smart HTTP fetch negotiation and bounded pack ingestion
 - Add configured repository remotes and remote-tracking ref updates
 - Add redacted Basic, Bearer, callback, and Git credential-helper authentication
+- Add bounded SSH ref discovery and fetch through the system SSH client
 
 ## 0.3.0 - 2026-09-15
 

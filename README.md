@@ -1,7 +1,7 @@
 <h1 align="center">Thuban</h1>
 
 <p align="center">
-  <strong>A pure Ruby Git implementation for local repositories and smart HTTP fetches</strong>
+  <strong>A pure Ruby Git implementation for local repositories and remote fetches</strong>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 ---
 
 Thuban is a pure Ruby Git implementation for reading and writing local
-repositories and fetching from smart HTTP remotes. It works directly with Git
+repositories and fetching from smart HTTP or SSH remotes. It works directly with Git
 data without invoking the Git executable.
 
 ## Features
@@ -37,6 +37,7 @@ data without invoking the Git executable.
 - Discovers smart HTTP protocol v2 and v0 remote references
 - Fetches smart HTTP packs into the local object database
 - Authenticates smart HTTP with Basic, Bearer, callbacks, or Git credential helpers
+- Discovers and fetches SSH remotes through the system `ssh` executable
 - Tracks line history across commits and renames with blame
 - Writes files atomically and checks out branches with collision guards
 - Supports linked worktrees and packed refs
@@ -271,8 +272,31 @@ remote_refs = repo.fetch("origin")
 
 Fetched packs are checksum-verified, bounded by byte/object/expanded-size
 limits, and expanded through the existing object database. Redirects,
-URL-embedded credentials, and SSH are rejected. Shallow and partial fetch
-options are present but rejected until their milestone is implemented.
+URL-embedded credentials, shallow fetches, and partial fetches are rejected until
+their dedicated milestones are implemented.
+
+SSH remotes accept both standard URL and scp-like forms. Thuban invokes the
+system SSH client without a local shell and uses `git-upload-pack` over its
+standard input and output:
+
+```ruby
+connection = Thuban::Remote.open("ssh://git@example.com/project.git")
+connection = Thuban::Remote.open("git@example.com:project.git")
+```
+
+Pass `ssh:` as an argument array or safely parsed command string to select a
+client and options. When omitted, `GIT_SSH_COMMAND` is parsed into arguments, or
+`ssh` is used by default:
+
+```ruby
+connection = Thuban::Remote.open(remote_url, ssh: ["ssh", "-F", "/safe/config"])
+```
+
+SSH runs in batch mode, is bounded by `timeout:`, and discards stderr so remote
+paths and server diagnostics are not copied into exceptions. User, host, port,
+and path syntax is validated before process startup. Passwords in SSH URLs are
+not supported; use normal SSH agents and configuration instead. Shallow and
+partial fetch options are present but rejected until their milestone is implemented.
 
 ### Match Ignored Paths
 
@@ -295,7 +319,7 @@ continuations, and command-scoped overrides are not evaluated.
 
 The current write API covers loose objects, the index, refs, reflogs, commits,
 guarded checkout, local history operations, stash, and delta-free pack output.
-Thuban can discover and fetch smart HTTP refs but does not yet push. Merges and
+Thuban can discover and fetch smart HTTP and SSH refs but does not yet push. Merges and
 pack delta generation are also outside the current scope. It does not provide
 its own diff algorithm; blame delegates line matching to Porrima through the
 injectable `differ:` argument.
@@ -313,6 +337,7 @@ ruby tools/check_isolation.rb
 bundle exec rbs -I sig -r porrima validate
 gem build --strict thuban.gemspec
 ruby bench/pack_write.rb --assert
+ruby bench/ssh_fetch.rb --assert
 ```
 
 ## Contributing

@@ -33,4 +33,4 @@ Git's `git-http-backend` can advertise refs and serve full or incremental packs
 that Thuban verifies and reads without invoking Git at runtime. Large fetches
 use bounded memory but may create many loose objects and temporarily use space
 for both the HTTP response and extracted pack. Redirects and authenticated or
-SSH remotes remain unsupported.
+SSH was outside this milestone and is added separately by ADR 007.

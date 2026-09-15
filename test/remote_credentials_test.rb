@@ -206,6 +206,23 @@ class RemoteCredentialsTest < Minitest::Test
     assert_nil error.cause
   end
 
+  def test_non_grouped_credential_helper_cleanup_uses_a_supported_signal
+    helper = Credentials.helper
+    waiter = Struct.new(:pid) do
+      def join(*) = true
+    end.new(1234)
+    signals = []
+
+    Process.stub(:kill, ->(signal, pid) { signals << [signal, pid] }) do
+      helper.send(:terminate, waiter, false)
+    end
+
+    assert_equal [["KILL", 1234]], signals
+    Process.stub(:kill, ->(*) { raise Errno::EINVAL }) do
+      helper.send(:terminate, waiter, false)
+    end
+  end
+
   def test_redirect_does_not_forward_authorization
     @redirect_target = HTTPFixture.new { [200, "text/plain", "unexpected"] }
     @server = HTTPFixture.new do

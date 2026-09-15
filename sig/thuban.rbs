@@ -38,7 +38,8 @@ module Thuban
   end
 
   module Remote
-    def self.open: (String url, ?credentials: untyped, ?ssh: untyped, ?timeout: Numeric) -> Connection
+    type ssh_command = String | Array[String]
+    def self.open: (String url, ?credentials: untyped, ?ssh: ssh_command?, ?timeout: Numeric) -> Connection
 
     module Credentials
       MAX_HELPER_OUTPUT: Integer
@@ -53,6 +54,12 @@ module Thuban
       def refs: () -> Array[Ref]
       def fetch: (Repository repository, wants: Enumerable[String], ?haves: Enumerable[String], ?depth: nil, ?filter: nil) -> Array[String]
       def close: () -> nil
+    end
+
+    class SSHConnection < Connection
+      MAX_COMMAND_ARGUMENTS: Integer
+      MAX_COMMAND_ARGUMENT_SIZE: Integer
+      def initialize: (String url, ?credentials: untyped, ?ssh: ssh_command?, ?timeout: Numeric) -> void
     end
   end
 
