@@ -9,18 +9,27 @@ module Thuban
       lock_path = path + ".lock"
       FileUtils.mkdir_p(File.dirname(path))
       file = File.open(lock_path, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
+      lock_identity = [file.stat.dev, file.stat.ino]
       owns_lock = true
       file.write(self.class.encode(entries, extensions: extensions, version: version))
       file.flush
       file.fsync
       file.close
       File.rename(lock_path, path)
+      owns_lock = false
       self
     rescue Errno::EEXIST
       raise IOError, "Git index is locked: #{lock_path}"
     ensure
       file&.close unless file&.closed?
-      File.unlink(lock_path) if owns_lock && File.exist?(lock_path)
+      if owns_lock
+        begin
+          stat = File.lstat(lock_path)
+          File.unlink(lock_path) if lock_identity == [stat.dev, stat.ino]
+        rescue Errno::ENOENT
+          nil
+        end
+      end
     end
 
     def stage(path, oid, mode, stat: nil)

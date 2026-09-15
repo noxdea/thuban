@@ -27,6 +27,7 @@ module Thuban
         file.write("#{new_oid}\n")
         sync(file)
         File.rename(file.path, ref_path(target))
+        locks.delete(ref_path(target))
         append_reflog(target, current, new_oid, identity, action)
         append_reflog(name, current, new_oid, identity, action) if target != name
       end
@@ -45,7 +46,7 @@ module Thuban
         verify_old_oid(name, current, old_oid)
         raise RefLockError, "reference does not exist: #{name}" unless current
         deleted = current
-        rewrite_packed_refs(locks[packed_path], packed_path, name) if locks[packed_path]
+        locks.delete(packed_path) if locks[packed_path] && rewrite_packed_refs(locks[packed_path], packed_path, name)
         File.unlink(ref_path(name)) if File.file?(ref_path(name)) || File.symlink?(ref_path(name))
         File.unlink(log_path(name)) if File.file?(log_path(name))
       end
@@ -61,6 +62,7 @@ module Thuban
         file.write("ref: #{target}\n")
         sync(file)
         File.rename(file.path, path)
+        locks.delete(path)
       end
       target
     end
@@ -81,7 +83,7 @@ module Thuban
     def validate_ref(name, head: true)
       return if head && name == "HEAD"
       invalid = !name.is_a?(String) || !name.start_with?("refs/") || name.end_with?("/", ".") ||
-        name.include?("..") || name.include?("@{") || name.match?(/[\x00-\x20~^:?*\[\\]/) ||
+        name.include?("..") || name.include?("@{") || name.match?(/[\x00-\x20\x7f~^:?*\[\\]/) ||
         name.split("/").any? { |part| part.empty? || part.start_with?(".") || part.downcase.end_with?(".lock") }
       raise ArgumentError, "invalid Git reference" if invalid
     end
@@ -110,18 +112,25 @@ module Thuban
 
     def with_locks(paths)
       locks = {}
+      identities = {}
       paths.uniq.sort.each do |path|
         prepare_storage_path(path)
         file = File.open(path + ".lock", File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
         locks[path] = file
+        identities[path] = [file.stat.dev, file.stat.ino]
       end
       yield locks
     rescue Errno::EEXIST => error
       raise RefLockError, "reference is locked: #{error.message}"
     ensure
-      locks&.each_value do |file|
+      locks&.each do |path, file|
         file.close unless file.closed?
-        File.unlink(file.path) if File.exist?(file.path)
+        begin
+          stat = File.lstat(file.path)
+          File.unlink(file.path) if identities[path] == [stat.dev, stat.ino]
+        rescue Errno::ENOENT
+          nil
+        end
       end
     end
 
@@ -152,17 +161,42 @@ module Thuban
     end
 
     def validate_storage_path(path)
-      raise ArgumentError, "unsafe Git metadata path" if File.symlink?(path)
+      root = storage_root(path)
+      relative = path.delete_prefix(root).delete_prefix(File::SEPARATOR)
+      cursor = root
+      relative.split(File::SEPARATOR).each do |part|
+        cursor = File.join(cursor, part)
+        raise ArgumentError, "unsafe Git metadata path" if File.symlink?(cursor)
+      end
       parent = File.realpath(File.dirname(path))
-      roots = [repository.git_dir, repository.common_dir].map { |root| File.realpath(root) }.uniq
-      return if roots.any? { |root| parent == root || parent.start_with?(root + File::SEPARATOR) }
+      real_root = File.realpath(root)
+      return if parent == real_root || parent.start_with?(real_root + File::SEPARATOR)
 
       raise ArgumentError, "unsafe Git metadata path"
     end
 
     def prepare_storage_path(path)
-      FileUtils.mkdir_p(File.dirname(path))
+      root = storage_root(path)
+      relative = File.dirname(path).delete_prefix(root).delete_prefix(File::SEPARATOR)
+      cursor = root
+      relative.split(File::SEPARATOR).each do |part|
+        cursor = File.join(cursor, part)
+        raise ArgumentError, "unsafe Git metadata path" if File.symlink?(cursor)
+        begin
+          Dir.mkdir(cursor)
+        rescue Errno::EEXIST
+          raise ArgumentError, "unsafe Git metadata path" unless File.directory?(cursor) && !File.symlink?(cursor)
+        end
+      end
       validate_storage_path(path)
+    end
+
+    def storage_root(path)
+      root = [repository.git_dir, repository.common_dir].uniq.sort_by { |candidate| -candidate.length }
+        .find { |candidate| path == candidate || path.start_with?(candidate + File::SEPARATOR) }
+      raise ArgumentError, "unsafe Git metadata path" unless root
+
+      root
     end
 
     def config_value(key)

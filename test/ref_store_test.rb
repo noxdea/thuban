@@ -56,10 +56,33 @@ class RefStoreTest < Minitest::Test
     assert_raises(ArgumentError) { @repository.update_ref("../config", @first) }
     assert_raises(ArgumentError) { @repository.create_branch("bad..name", @first) }
     assert_raises(ArgumentError) { @repository.create_branch("bad.LOCK", @first) }
+    assert_raises(ArgumentError) { @repository.create_branch("bad\x7fname", @first) }
     lock = File.join(@directory, ".git", "refs", "heads", "main.lock")
     File.binwrite(lock, "held")
-    assert_raises(Thuban::RefLockError) { @repository.update_ref("refs/heads/main", @second) }
+    assert_raises(Thuban::RefLockError) { @repository.update_ref("HEAD", @second) }
     assert_equal "held", File.binread(lock)
+    refute File.exist?(File.join(@directory, ".git", "HEAD.lock"))
+  end
+
+  def test_rejects_reference_directories_symlinked_within_git_metadata
+    tags = File.join(@directory, ".git", "refs", "tags")
+    Dir.rmdir(tags)
+    File.symlink(File.join(@directory, ".git", "refs", "heads"), tags)
+
+    assert_raises(ArgumentError) { @repository.update_ref("refs/tags/main", @second) }
+    assert_equal @first, @repository.head
+  end
+
+  def test_keeps_a_foreign_lock_created_after_replacement
+    lock = File.join(@directory, ".git", "refs", "heads", "main.lock")
+    rename = File.method(:rename)
+    replacement = lambda do |source, target|
+      rename.call(source, target)
+      File.binwrite(source, "foreign") if source == lock
+    end
+
+    File.stub(:rename, replacement) { @repository.update_ref("refs/heads/main", @second) }
+    assert_equal "foreign", File.binread(lock)
   end
 
   def test_rejects_symlinked_reference_directories

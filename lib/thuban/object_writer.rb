@@ -71,9 +71,11 @@ module Thuban
         raise ArgumentError, "invalid tree mode" unless TREE_MODES.include?(entry.mode)
         raise ArgumentError, "expected a full SHA-1 object id" unless /\A[0-9a-f]{40}\z/.match?(entry.oid.to_s)
 
-        expected = entry.mode == 0o040000 ? "tree" : entry.mode == 0o160000 ? "commit" : "blob"
-        type, = odb.read(entry.oid)
-        raise ArgumentError, "tree entry mode does not match object" unless type == expected
+        unless entry.mode == 0o160000
+          expected = entry.mode == 0o040000 ? "tree" : "blob"
+          type, = odb.read(entry.oid)
+          raise ArgumentError, "tree entry mode does not match object" unless type == expected
+        end
 
         seen[name.b] = true
         [name.b + (entry.mode == 0o040000 ? "/" : ""), "#{entry.mode.to_s(8)} #{name}\0".b + [entry.oid].pack("H*")]
@@ -89,7 +91,7 @@ module Thuban
       raise ArgumentError, "commit message contains NUL" if message.include?("\0")
 
       author_line = format_signature(author)
-      committer_line = format_signature(committer || author)
+      committer_line = committer ? format_signature(committer) : author_line
       body = +"tree #{tree}\n"
       parents.each { |oid| body << "parent #{oid}\n" }
       body << "author #{author_line}\ncommitter #{committer_line}\n\n#{message}"
@@ -109,8 +111,8 @@ module Thuban
       raise TypeError, "expected Thuban::Signature" unless signature.is_a?(Signature)
       raise TypeError, "signature name and email must be Strings" unless signature.name.is_a?(String) && signature.email.is_a?(String)
       name, email = signature.name, signature.email
-      raise ArgumentError, "invalid signature name" if name.empty? || name.match?(/[\r\n<>]/)
-      raise ArgumentError, "invalid signature email" if email.empty? || email.match?(/[\r\n<>]/)
+      raise ArgumentError, "invalid signature name" if name.empty? || name.match?(/[\x00-\x1f\x7f<>]/)
+      raise ArgumentError, "invalid signature email" if email.empty? || email.match?(/[\x00-\x1f\x7f<>]/)
 
       time = signature.time || Time.now
       timestamp = begin

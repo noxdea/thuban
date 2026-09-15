@@ -52,6 +52,16 @@ class CommitWriterTest < Minitest::Test
     assert_git_fsck
   end
 
+  def test_commits_on_a_detached_head_without_advancing_a_branch
+    git("checkout", "--detach", "-q")
+    oid = @repository.commit!(message: "Detached", author: @signature)
+
+    assert_equal oid, git("rev-parse", "HEAD").strip
+    assert_equal @initial, git("rev-parse", "main").strip
+    assert_equal [@initial], @repository.commit(oid).parents
+    assert_git_fsck
+  end
+
   def test_commits_an_unborn_empty_repository
     empty = Dir.mktmpdir("thuban-unborn-")
     git_in(empty, "init", "-q", "-b", "main")

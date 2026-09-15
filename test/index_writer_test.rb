@@ -87,6 +87,54 @@ class IndexWriterTest < Minitest::Test
     assert_equal oid, git("rev-parse", ":tracked.txt").strip
   end
 
+  def test_round_trips_extended_flags_in_versions_three_and_four
+    long_path = "a" * 130
+    File.binwrite(File.join(@directory, long_path), "long\n")
+    git("add", long_path)
+    git("update-index", "--skip-worktree", "tracked.txt")
+    expected_status = git("status", "--porcelain=v1")
+    [3, 4].each do |version|
+      git("update-index", "--index-version=#{version}")
+      index = @repository.index
+      assert_equal version, index.version
+      assert_operator index["tracked.txt"].extended_flags, :>, 0
+      original = File.binread(index.path)
+      index.write
+      assert_equal original, File.binread(index.path)
+      assert_equal expected_status, git("status", "--porcelain=v1")
+    end
+  end
+
+  def test_rejects_bad_checksums_and_required_extensions
+    path = File.join(@directory, ".git", "index")
+    original = File.binread(path)
+    File.binwrite(path, original.dup.tap { |bytes| bytes.setbyte(12, bytes.getbyte(12) ^ 1) })
+    assert_raises(Thuban::CorruptObject) { @repository.index }
+
+    File.binwrite(path, original)
+    bytes = original.byteslice(0...-20) + "link" + [0].pack("N")
+    File.binwrite(path, bytes + Digest::SHA1.digest(bytes))
+    error = assert_raises(Thuban::CorruptObject) { @repository.index }
+    assert_match(/unsupported mandatory index extension link/, error.message)
+
+    File.binwrite(path, original)
+    git("update-index", "--split-index")
+    assert_raises(Thuban::CorruptObject) { @repository.index }
+  end
+
+  def test_keeps_a_foreign_lock_created_after_replacement
+    index = @repository.index
+    lock = index.path + ".lock"
+    rename = File.method(:rename)
+    replacement = lambda do |source, target|
+      rename.call(source, target)
+      File.binwrite(source, "foreign") if source == lock
+    end
+
+    File.stub(:rename, replacement) { index.write }
+    assert_equal "foreign", File.binread(lock)
+  end
+
   def test_preserves_resolve_undo_records
     git("checkout", "-qb", "side")
     File.binwrite(File.join(@directory, "tracked.txt"), "side\n")
@@ -113,6 +161,9 @@ class IndexWriterTest < Minitest::Test
     assert_raises(ArgumentError) { index.stage("../bad", oid, 0o100644) }
     assert_raises(ArgumentError) { index.stage(".GIT/config", oid, 0o100644) }
     assert_raises(ArgumentError) { index.stage("..\\config", oid, 0o100644) }
+    index.extensions << "bad"
+    assert_raises(ArgumentError) { index.write }
+    refute File.exist?(index.path + ".lock")
     File.binwrite(index.path + ".lock", "held")
     assert_raises(IOError) { index.write }
     assert_equal "held", File.binread(index.path + ".lock")
