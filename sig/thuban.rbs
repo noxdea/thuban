@@ -9,6 +9,9 @@ module Thuban
   class CorruptObject < StandardError
   end
 
+  class RefLockError < StandardError
+  end
+
   class Commit < Struct[untyped]
     attr_accessor oid: String
     attr_accessor tree: String?
@@ -74,6 +77,12 @@ module Thuban
     def write_blob: (String content) -> String
     def write_tree: (Array[TreeEntry] entries) -> String
     def write_commit: (tree: String, ?parents: Array[String], author: Signature, ?committer: Signature?, message: String) -> String
+    def update_ref: (String name, String new_oid, ?old_oid: String | Symbol | nil, ?message: String?) -> String
+    def delete_ref: (String name, ?old_oid: String | Symbol | nil) -> String
+    def create_branch: (String name, String oid) -> String
+    def delete_branch: (String name) -> String
+    def symbolic_ref: (String name, String target) -> String
+    def reflog: (String name) -> Array[String]
   end
 
   class ObjectDatabase
@@ -85,6 +94,15 @@ module Thuban
     def exist?: (String oid) -> bool
     def write: (String type, String data) -> String
     def write_loose: (String type, String data) -> String
+  end
+
+  class RefStore
+    ZERO_OID: String
+    def initialize: (Repository repository) -> void
+    def update: (String name, String new_oid, ?old_oid: String | Symbol | nil, ?message: String?) -> String
+    def delete: (String name, ?old_oid: String | Symbol | nil) -> String
+    def symbolic: (String name, String target) -> String
+    def reflog: (String name) -> Array[String]
   end
 
   class Pack
