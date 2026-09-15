@@ -40,8 +40,16 @@ module Thuban
   module Remote
     def self.open: (String url, ?credentials: untyped, ?ssh: untyped, ?timeout: Numeric) -> Connection
 
+    module Credentials
+      MAX_HELPER_OUTPUT: Integer
+      def self.static: (username: String, password: String) -> untyped
+      def self.bearer: (token: String) -> untyped
+      def self.helper: (?String? name) -> untyped
+      def self.callback: () { (String) -> untyped } -> untyped
+    end
+
     class Connection
-      def initialize: (String url, ?timeout: Numeric) -> void
+      def initialize: (String url, ?credentials: untyped, ?timeout: Numeric) -> void
       def refs: () -> Array[Ref]
       def fetch: (Repository repository, wants: Enumerable[String], ?haves: Enumerable[String], ?depth: nil, ?filter: nil) -> Array[String]
       def close: () -> nil

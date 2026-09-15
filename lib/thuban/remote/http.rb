@@ -9,10 +9,13 @@ module Thuban
     class Connection
       MAX_ADVERTISEMENT_SIZE = 8 * 1024 * 1024
 
-      def initialize(url, timeout: 30)
+      def initialize(url, credentials: nil, timeout: 30)
         @uri = parse_url(url)
+        Credentials.validate(credentials)
+        @credentials = credentials
         @timeout = Float(timeout)
         raise ArgumentError, "timeout must be between 0 and 300 seconds" unless @timeout.positive? && @timeout <= 300
+        @authorization_lock = Mutex.new
         @closed = false
       rescue ArgumentError, TypeError => error
         raise error if error.message.start_with?("timeout")
@@ -159,7 +162,10 @@ module Thuban
         http.use_ssl = endpoint.scheme == "https"
         http.open_timeout = http.read_timeout = @timeout
         http.write_timeout = @timeout if http.respond_to?(:write_timeout=)
-        request = (method == :get ? Net::HTTP::Get : Net::HTTP::Post).new(endpoint.request_uri, headers.merge("Accept-Encoding" => "identity"))
+        request_headers = headers.merge("Accept-Encoding" => "identity")
+        auth = authorization
+        request_headers["Authorization"] = auth if auth
+        request = (method == :get ? Net::HTTP::Get : Net::HTTP::Post).new(endpoint.request_uri, request_headers)
         request.body = body if body
         received = 0
         http.start do
@@ -189,6 +195,15 @@ module Thuban
         raise TransportError, "HTTP request failed (#{code})" unless code == 200
         actual = response["content-type"].to_s.split(";", 2).first.downcase
         raise TransportError, "unexpected HTTP content type" unless actual == content_type
+      end
+
+      def authorization
+        return @authorization if defined?(@authorization)
+
+        @authorization_lock.synchronize do
+          @authorization = @credentials&.send(:authorization, @uri, timeout: @timeout) unless defined?(@authorization)
+        end
+        @authorization
       end
 
       def ensure_open

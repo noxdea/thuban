@@ -5,6 +5,7 @@
 - Add pkt-line parsing and smart HTTP protocol v2/v0 reference discovery
 - Add smart HTTP fetch negotiation and bounded pack ingestion
 - Add configured repository remotes and remote-tracking ref updates
+- Add redacted Basic, Bearer, callback, and Git credential-helper authentication
 
 ## 0.3.0 - 2026-09-15
 

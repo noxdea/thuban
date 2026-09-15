@@ -36,6 +36,7 @@ data without invoking the Git executable.
 - Writes interoperable delta-free Git packfiles to any writable IO
 - Discovers smart HTTP protocol v2 and v0 remote references
 - Fetches smart HTTP packs into the local object database
+- Authenticates smart HTTP with Basic, Bearer, callbacks, or Git credential helpers
 - Tracks line history across commits and renames with blame
 - Writes files atomically and checks out branches with collision guards
 - Supports linked worktrees and packed refs
@@ -222,6 +223,44 @@ wanted = connection.refs.find { |ref| ref.name == "refs/heads/main" }.oid
 received_oids = connection.fetch(repo, wants: [wanted], haves: repo.refs.values.compact)
 ```
 
+Authenticate with fixed Basic or Bearer credentials when appropriate:
+
+```ruby
+credentials = Thuban::Remote::Credentials.static(
+  username: ENV.fetch("GIT_USERNAME"),
+  password: ENV.fetch("GIT_PASSWORD")
+)
+connection = Thuban::Remote.open(remote_url, credentials: credentials)
+
+token = Thuban::Remote::Credentials.bearer(token: ENV.fetch("GIT_TOKEN"))
+connection = Thuban::Remote.open(remote_url, credentials: token)
+```
+
+For credentials that are selected or refreshed at runtime, return another
+credential object from a callback. The callback receives the remote URL with no
+embedded user information:
+
+```ruby
+credentials = Thuban::Remote::Credentials.callback do |url|
+  Thuban::Remote::Credentials.bearer(token: token_for(url))
+end
+```
+
+Use the normal configured Git credential helpers, or select a helper by name:
+
+```ruby
+credentials = Thuban::Remote::Credentials.helper
+credentials = Thuban::Remote::Credentials.helper("store --file=/secure/path")
+connection = Thuban::Remote.open(remote_url, credentials: credentials)
+```
+
+Helper lookup uses `git credential fill` with terminal prompting disabled and is
+bounded by the connection timeout. Thuban never includes credentials, helper
+output, response bodies, or remote URLs in transport errors. Credential objects
+also redact their inspection output. URL-embedded credentials and HTTP redirects
+remain rejected so an authorization header cannot be forwarded to another
+origin.
+
 For a repository with a normal `[remote "origin"]` configuration, the
 high-level operation reads its fetch refspec and updates remote-tracking refs:
 
@@ -231,11 +270,9 @@ remote_refs = repo.fetch("origin")
 ```
 
 Fetched packs are checksum-verified, bounded by byte/object/expanded-size
-limits, and expanded through the existing object database. The current
-transport accepts unauthenticated HTTP(S) URLs only. Redirects, URL-embedded
-credentials, SSH, and explicit credentials are rejected until the corresponding
-authentication and SSH milestones define their handling. Shallow and partial
-fetch options are present but rejected until their milestone is implemented.
+limits, and expanded through the existing object database. Redirects,
+URL-embedded credentials, and SSH are rejected. Shallow and partial fetch
+options are present but rejected until their milestone is implemented.
 
 ### Match Ignored Paths
 

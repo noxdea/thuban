@@ -9,10 +9,9 @@ module Thuban
 
   module Remote
     def self.open(url, credentials: nil, ssh: nil, timeout: 30)
-      raise AuthenticationError, "credentials are not supported yet" if credentials
       raise TransportError, "SSH transport is not supported yet" if ssh
 
-      Connection.new(url, timeout: timeout)
+      Connection.new(url, credentials: credentials, timeout: timeout)
     end
   end
 end
