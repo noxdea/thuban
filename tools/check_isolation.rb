@@ -10,4 +10,4 @@ Dir[File.expand_path("../lib/**/*.rb", __dir__)].each do |file|
   abort "display concern in #{file}" if source.include?("\e[")
 end
 
-puts "Git reader with a single diff dependency: OK"
+puts "Git implementation with a single diff dependency: OK"

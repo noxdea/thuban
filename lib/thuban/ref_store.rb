@@ -14,6 +14,9 @@ module Thuban
       raise ArgumentError, "Git object not found: #{new_oid}" unless repository.odb.exist?(new_oid)
 
       target = dereference(name)
+      identity = repository.send(:format_signature, reflog_signature)
+      action = message.to_s.gsub(/[\x00-\x1f]/, " ")
+      [target, name].uniq.each { |reference| prepare_storage_path(log_path(reference)) }
       paths = [ref_path(target)]
       paths << ref_path(name) if target != name
       with_locks(paths) do |locks|
@@ -24,8 +27,8 @@ module Thuban
         file.write("#{new_oid}\n")
         sync(file)
         File.rename(file.path, ref_path(target))
-        append_reflog(target, current, new_oid, message)
-        append_reflog(name, current, new_oid, message) if target != name
+        append_reflog(target, current, new_oid, identity, action)
+        append_reflog(name, current, new_oid, identity, action) if target != name
       end
       new_oid
     end
@@ -35,14 +38,15 @@ module Thuban
       paths = [ref_path(name)]
       packed_path = File.join(repository.common_dir, "packed-refs")
       paths << packed_path if File.file?(packed_path)
+      prepare_storage_path(log_path(name))
       deleted = nil
       with_locks(paths) do |locks|
         current = repository.resolve(name)
         verify_old_oid(name, current, old_oid)
         raise RefLockError, "reference does not exist: #{name}" unless current
         deleted = current
-        File.unlink(ref_path(name)) if File.file?(ref_path(name)) || File.symlink?(ref_path(name))
         rewrite_packed_refs(locks[packed_path], packed_path, name) if locks[packed_path]
+        File.unlink(ref_path(name)) if File.file?(ref_path(name)) || File.symlink?(ref_path(name))
         File.unlink(log_path(name)) if File.file?(log_path(name))
       end
       deleted
@@ -64,7 +68,10 @@ module Thuban
     def reflog(name)
       name = "refs/heads/#{name}" unless name == "HEAD" || name.start_with?("refs/")
       validate_ref(name)
-      File.file?(log_path(name)) ? File.readlines(log_path(name), chomp: true, encoding: Encoding::BINARY) : []
+      path = log_path(name)
+      return [] unless File.file?(path)
+      validate_storage_path(path)
+      File.readlines(path, chomp: true, encoding: Encoding::BINARY)
     end
 
     private
@@ -75,7 +82,7 @@ module Thuban
       return if head && name == "HEAD"
       invalid = !name.is_a?(String) || !name.start_with?("refs/") || name.end_with?("/", ".") ||
         name.include?("..") || name.include?("@{") || name.match?(/[\x00-\x20~^:?*\[\\]/) ||
-        name.split("/").any? { |part| part.empty? || part.start_with?(".") || part.end_with?(".lock") }
+        name.split("/").any? { |part| part.empty? || part.start_with?(".") || part.downcase.end_with?(".lock") }
       raise ArgumentError, "invalid Git reference" if invalid
     end
 
@@ -89,6 +96,7 @@ module Thuban
         raise CorruptObject, "cyclic symbolic reference" if seen.include?(name) || seen.length > 32
         seen << name
         path = ref_path(name)
+        raise ArgumentError, "unsafe Git metadata path" if File.symlink?(path)
         return name unless File.file?(path)
         value = File.read(path).strip
         return name unless value.start_with?("ref: ")
@@ -103,7 +111,7 @@ module Thuban
     def with_locks(paths)
       locks = {}
       paths.uniq.sort.each do |path|
-        FileUtils.mkdir_p(File.dirname(path))
+        prepare_storage_path(path)
         file = File.open(path + ".lock", File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
         locks[path] = file
       end
@@ -128,11 +136,9 @@ module Thuban
       file.close
     end
 
-    def append_reflog(name, old_oid, new_oid, message)
+    def append_reflog(name, old_oid, new_oid, identity, action)
       path = log_path(name)
-      FileUtils.mkdir_p(File.dirname(path))
-      identity = repository.send(:format_signature, reflog_signature)
-      action = message.to_s.tr("\r\n\t", " ")
+      prepare_storage_path(path)
       File.open(path, File::WRONLY | File::CREAT | File::APPEND | File::BINARY, 0o644) do |file|
         file.write("#{old_oid || ZERO_OID} #{new_oid} #{identity}\t#{action}\n")
         file.flush
@@ -143,6 +149,20 @@ module Thuban
     def reflog_signature
       Signature.new(name: ENV["GIT_COMMITTER_NAME"] || config_value("name") || ENV["USER"] || "unknown",
         email: ENV["GIT_COMMITTER_EMAIL"] || config_value("email") || "unknown@localhost", time: Time.now)
+    end
+
+    def validate_storage_path(path)
+      raise ArgumentError, "unsafe Git metadata path" if File.symlink?(path)
+      parent = File.realpath(File.dirname(path))
+      roots = [repository.git_dir, repository.common_dir].map { |root| File.realpath(root) }.uniq
+      return if roots.any? { |root| parent == root || parent.start_with?(root + File::SEPARATOR) }
+
+      raise ArgumentError, "unsafe Git metadata path"
+    end
+
+    def prepare_storage_path(path)
+      FileUtils.mkdir_p(File.dirname(path))
+      validate_storage_path(path)
     end
 
     def config_value(key)

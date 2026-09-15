@@ -81,6 +81,14 @@ class CommitWriterTest < Minitest::Test
     FileUtils.remove_entry(empty) if empty && File.exist?(empty)
   end
 
+  def test_refuses_excessive_index_path_nesting
+    index = @repository.index
+    original = index["file.txt"]
+    index.entries.replace([original.dup.tap { |entry| entry.path = (["a"] * 257).join("/") }])
+    index.write
+    assert_raises(ArgumentError) { @repository.write_tree_from_index }
+  end
+
   private
 
   def write(path, content)

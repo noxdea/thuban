@@ -10,6 +10,7 @@ module Thuban
       current.entries.each do |entry|
         node = root
         parts = entry.path.split("/")
+        raise ArgumentError, "index path nesting exceeds limit" if parts.length > 256
         parts[0...-1].each do |part|
           raise ArgumentError, "index contains a file/directory collision" if node.key?(part) && !node[part].is_a?(Hash)
           node = node[part] ||= {}

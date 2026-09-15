@@ -1,7 +1,7 @@
 <h1 align="center">Thuban</h1>
 
 <p align="center">
-  <strong>A pure Ruby reader for local Git repositories</strong>
+  <strong>A pure Ruby implementation for local Git repositories</strong>
 </p>
 
 <p align="center">
@@ -22,15 +22,16 @@
 
 ---
 
-Thuban is a pure Ruby Git repository reader for objects, packs, index,
-status, blame, and guarded checkout. It works directly with local repository
-data without invoking the Git executable.
+Thuban is a pure Ruby Git implementation for reading and writing local
+repositories. It works directly with repository data without invoking the Git
+executable.
 
 ## Features
 
 - Reads loose objects and packfiles, including deltified objects
 - Resolves refs, branches, commits, trees, and blobs
 - Reads the index and reports staged, worktree, and untracked changes
+- Writes loose objects, index entries, refs, reflogs, trees, and commits
 - Tracks line history across commits and renames with blame
 - Writes files atomically and checks out branches with collision guards
 - Supports linked worktrees and packed refs
@@ -116,6 +117,43 @@ repo.checkout("feature")
 file atomically. `Repository#checkout` requires a clean tracked worktree and
 aborts on untracked or ignored collisions.
 
+### Stage and Commit
+
+Write a blob, add it to the index, then create a commit from the index:
+
+```ruby
+path = "README.md"
+oid = repo.write_blob(File.binread(path))
+index = repo.index
+index.stage(path, oid, 0o100644, stat: File.stat(path))
+index.write
+
+author = Thuban::Signature.new(
+  name: "Example Author",
+  email: "author@example.com",
+  time: Time.now
+)
+commit = repo.commit!(message: "Update README", author: author)
+```
+
+`Index#write` uses Git's `index.lock`, retains optional extensions as raw bytes,
+and invalidates entry-dependent cache extensions after mutation. `unstage`
+removes the stage-zero entry; stage the corresponding HEAD entry to restore a
+tracked path. `conflicts` exposes stage 1/2/3 entries and `resolve` replaces
+them with a stage-zero entry.
+
+Create and update refs with optimistic old-OID checks:
+
+```ruby
+repo.create_branch("topic", repo.head)
+repo.update_ref("refs/heads/topic", commit, old_oid: repo.head, message: "advance")
+repo.reflog("topic") # raw Git reflog records
+```
+
+Ref mutations use `.lock` files and raise `Thuban::RefLockError` when a lock is
+held or the expected old OID no longer matches. Loose updates override packed
+refs, and deletion removes both forms.
+
 ### Match Ignored Paths
 
 Load Git's global excludes, `.git/info/exclude`, and nested `.gitignore` files.
@@ -135,9 +173,11 @@ continuations, and command-scoped overrides are not evaluated.
 
 ## Scope
 
-Thuban does not perform network operations such as fetch or push, rewrite
-history, or provide its own diff algorithm. Blame delegates line matching to
-Porrima through the injectable `differ:` argument.
+The current write API covers loose objects, the index, refs, reflogs, commits,
+and guarded checkout. Thuban does not yet perform network operations, pack
+writes, merge, reset, cherry-pick, revert, or stash. It does not provide its own
+diff algorithm; blame delegates line matching to Porrima through the injectable
+`differ:` argument.
 
 Support is limited to the index and pack formats covered by the test suite.
 Submodule checkout and optional Git extensions outside that coverage are not

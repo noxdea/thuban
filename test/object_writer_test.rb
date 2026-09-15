@@ -35,8 +35,20 @@ class ObjectWriterTest < Minitest::Test
     assert_raises(ArgumentError) { @repository.odb.exist?("../config") }
     assert_raises(ArgumentError) { @repository.odb.write("evil", "content") }
     assert_raises(ArgumentError) { @repository.write_tree([Thuban::TreeEntry.new(path: "../bad", oid: blob, mode: 0o100644)]) }
+    assert_raises(ArgumentError) { @repository.write_tree([Thuban::TreeEntry.new(path: ".GIT", oid: blob, mode: 0o100644)]) }
     assert_raises(ArgumentError) { @repository.write_tree([Thuban::TreeEntry.new(path: "bad", oid: blob, mode: 0o040000)]) }
     assert_raises(ArgumentError) { @repository.write_commit(tree: blob, author: @signature, message: "bad") }
+    assert_raises(TypeError) { @repository.write_commit(tree: @repository.write_tree([]), author: Object.new, message: "bad") }
+  end
+
+  def test_rejects_a_symlinked_loose_object_directory
+    outside = Dir.mktmpdir("thuban-object-outside-")
+    content = (0..).lazy.map(&:to_s).find { |candidate| Thuban::ObjectDatabase.hash("blob", candidate).start_with?("aa") }
+    File.symlink(outside, File.join(@directory, ".git", "objects", "aa"))
+    assert_raises(ArgumentError) { @repository.write_blob(content) }
+    assert_empty Dir.children(outside)
+  ensure
+    FileUtils.remove_entry(outside) if outside && File.exist?(outside)
   end
 
   private

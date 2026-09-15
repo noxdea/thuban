@@ -68,7 +68,9 @@ module Thuban
     end
 
     def validate_path(path)
-      raise ArgumentError, "unsafe index path" unless path.is_a?(String) && !path.empty? && !path.include?("\0") && !path.start_with?("/") && !path.split("/").any? { |part| ["", "..", ".git"].include?(part) }
+      safe = path.is_a?(String) && !path.empty? && !path.include?("\0") && !path.include?("\\") && !path.start_with?("/") &&
+        !path.split("/").any? { |part| ["", ".", ".."].include?(part) || part.casecmp?(".git") }
+      raise ArgumentError, "unsafe index path" unless safe
     end
 
     def stat_fields(stat)

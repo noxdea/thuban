@@ -6,7 +6,12 @@ module Thuban
 
     def exist?(oid)
       validate_oid(oid)
-      return true if File.file?(File.join(directory, oid[0, 2], oid[2..]))
+      loose = File.join(directory, oid[0, 2], oid[2..])
+      raise ArgumentError, "unsafe loose object path" if File.symlink?(loose)
+      if File.file?(loose)
+        validate_object_directory(File.dirname(loose))
+        return true
+      end
       return true if packs.any? { |pack| pack.include?(oid) }
 
       @packs = nil
@@ -24,7 +29,10 @@ module Thuban
       return oid if exist?(oid)
 
       target = File.join(directory, oid[0, 2], oid[2..])
-      FileUtils.mkdir_p(File.dirname(target))
+      object_directory = File.dirname(target)
+      raise ArgumentError, "unsafe loose object directory" if File.symlink?(object_directory)
+      FileUtils.mkdir_p(object_directory)
+      validate_object_directory(object_directory)
       Tempfile.create([".thuban-object-", ".tmp"], File.dirname(target)) do |file|
         file.binmode
         file.chmod(0o444)
@@ -42,6 +50,11 @@ module Thuban
     def validate_oid(oid)
       raise ArgumentError, "expected a full SHA-1 object id" unless /\A[0-9a-f]{40}\z/.match?(oid.to_s)
     end
+
+    def validate_object_directory(path)
+      root = File.realpath(directory)
+      raise ArgumentError, "unsafe loose object directory" if File.symlink?(path) || !File.realpath(path).start_with?(root + File::SEPARATOR)
+    end
   end
 
   class Repository
@@ -53,7 +66,7 @@ module Thuban
       seen = {}
       records = entries.map do |entry|
         name = entry.path
-        raise ArgumentError, "unsafe tree entry" unless name.is_a?(String) && !name.empty? && !name.include?("/") && !name.include?("\0") && ![".", "..", ".git"].include?(name)
+        raise ArgumentError, "unsafe tree entry" unless name.is_a?(String) && !name.empty? && !name.include?("/") && !name.include?("\0") && ![".", ".."].include?(name) && !name.casecmp?(".git")
         raise ArgumentError, "duplicate tree entry: #{name}" if seen[name.b]
         raise ArgumentError, "invalid tree mode" unless TREE_MODES.include?(entry.mode)
         raise ArgumentError, "expected a full SHA-1 object id" unless /\A[0-9a-f]{40}\z/.match?(entry.oid.to_s)
@@ -94,12 +107,17 @@ module Thuban
 
     def format_signature(signature)
       raise TypeError, "expected Thuban::Signature" unless signature.is_a?(Signature)
-      name, email = signature.name.to_s, signature.email.to_s
+      raise TypeError, "signature name and email must be Strings" unless signature.name.is_a?(String) && signature.email.is_a?(String)
+      name, email = signature.name, signature.email
       raise ArgumentError, "invalid signature name" if name.empty? || name.match?(/[\r\n<>]/)
       raise ArgumentError, "invalid signature email" if email.empty? || email.match?(/[\r\n<>]/)
 
       time = signature.time || Time.now
-      timestamp = time.respond_to?(:to_time) ? time.to_time.to_i : Integer(time)
+      timestamp = begin
+        time.respond_to?(:to_time) ? time.to_time.to_i : Integer(time)
+      rescue ArgumentError, TypeError
+        raise ArgumentError, "invalid signature time"
+      end
       offset = signature.offset
       offset = time.utc_offset if offset.nil? && time.respond_to?(:utc_offset)
       offset ||= 0
@@ -114,9 +132,6 @@ module Thuban
       raise ArgumentError, "invalid signature offset" unless /\A[+-](?:[01]\d|2[0-3])[0-5]\d\z/.match?(zone)
 
       "#{name} <#{email}> #{timestamp} #{zone}"
-    rescue ArgumentError, TypeError => error
-      raise error if error.message.start_with?("invalid signature")
-      raise ArgumentError, "invalid signature time"
     end
   end
 end

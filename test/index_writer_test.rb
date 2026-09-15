@@ -42,8 +42,10 @@ class IndexWriterTest < Minitest::Test
 
     index = @repository.index
     assert_equal %w[TREE UNTR ZZZZ], signatures(index)
+    original_bytes = File.binread(index.path)
     before = index.extensions.map(&:dup)
     index.write
+    assert_equal original_bytes, File.binread(index.path)
     assert_equal before, @repository.index.extensions
     assert_empty git("status", "--porcelain=v1")
 
@@ -65,7 +67,9 @@ class IndexWriterTest < Minitest::Test
     git("commit", "-qm", "Add nested files")
     original = @repository.index
     assert_equal 4, original.version
+    original_bytes = File.binread(original.path)
     original.write
+    assert_equal original_bytes, File.binread(original.path)
     assert_equal original.entries.map { |entry| [entry.path, entry.oid] }, @repository.index.entries.map { |entry| [entry.path, entry.oid] }
     assert_empty git("status", "--porcelain=v1")
 
@@ -107,6 +111,8 @@ class IndexWriterTest < Minitest::Test
     index = @repository.index
     oid = @repository.write_blob("bad")
     assert_raises(ArgumentError) { index.stage("../bad", oid, 0o100644) }
+    assert_raises(ArgumentError) { index.stage(".GIT/config", oid, 0o100644) }
+    assert_raises(ArgumentError) { index.stage("..\\config", oid, 0o100644) }
     File.binwrite(index.path + ".lock", "held")
     assert_raises(IOError) { index.write }
     assert_equal "held", File.binread(index.path + ".lock")

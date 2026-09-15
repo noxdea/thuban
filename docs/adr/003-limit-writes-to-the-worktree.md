@@ -1,6 +1,6 @@
 # ADR 003: Limit writes to guarded worktree operations
 
-- Status: Accepted
+- Status: Superseded by ADR 004
 - Date: 2026-09-12
 
 ## Context

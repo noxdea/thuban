@@ -55,10 +55,22 @@ class RefStoreTest < Minitest::Test
   def test_rejects_invalid_names_and_preserves_foreign_locks
     assert_raises(ArgumentError) { @repository.update_ref("../config", @first) }
     assert_raises(ArgumentError) { @repository.create_branch("bad..name", @first) }
+    assert_raises(ArgumentError) { @repository.create_branch("bad.LOCK", @first) }
     lock = File.join(@directory, ".git", "refs", "heads", "main.lock")
     File.binwrite(lock, "held")
     assert_raises(Thuban::RefLockError) { @repository.update_ref("refs/heads/main", @second) }
     assert_equal "held", File.binread(lock)
+  end
+
+  def test_rejects_symlinked_reference_directories
+    outside = Dir.mktmpdir("thuban-ref-outside-")
+    tags = File.join(@directory, ".git", "refs", "tags")
+    Dir.rmdir(tags)
+    File.symlink(outside, tags)
+    assert_raises(ArgumentError) { @repository.update_ref("refs/tags/unsafe", @first) }
+    assert_empty Dir.children(outside)
+  ensure
+    FileUtils.remove_entry(outside) if outside && File.exist?(outside)
   end
 
   private

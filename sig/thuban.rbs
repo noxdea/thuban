@@ -32,7 +32,7 @@ module Thuban
   class Signature < Struct[untyped]
     attr_accessor name: String
     attr_accessor email: String
-    attr_accessor time: Time | Integer
+    attr_accessor time: Time | Integer | nil
     attr_accessor offset: String | Integer | nil
     def self.new: (name: String, email: String, ?time: Time | Integer, ?offset: String | Integer?) -> instance
   end
