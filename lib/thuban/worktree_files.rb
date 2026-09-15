@@ -12,9 +12,7 @@ module Thuban
     def each(&block)
       return enum_for(__method__) unless block
 
-      rules = IgnoreMatcher.new
-      exclude = File.join(@common_dir, "info", "exclude")
-      rules = rules.add(File.read(exclude), base: "") if File.file?(exclude)
+      rules = IgnoreMatcher.load(@root)
       walk("", rules, {}, &block)
       self
     end
@@ -26,10 +24,6 @@ module Thuban
       return if visited[[stat.dev, stat.ino]]
 
       visited[[stat.dev, stat.ino]] = true
-      %w[.gitignore .ignore].each do |name|
-        source = path(directory.empty? ? name : File.join(directory, name))
-        rules = rules.add(File.read(source, encoding: "UTF-8"), base: directory) if File.file?(source)
-      end
       Dir.children(path(directory)).sort.each do |name|
         next if name == ".git"
 

@@ -23,14 +23,22 @@ module Thuban
         raise RefLockError, "symbolic reference changed: #{name}" unless dereference(name) == target
         current = repository.resolve(target)
         verify_old_oid(name, current, old_oid)
-        yield current if block_given?
-        file = locks.fetch(ref_path(target))
-        file.write("#{new_oid}\n")
-        sync(file)
-        File.rename(file.path, ref_path(target))
-        locks.delete(ref_path(target))
-        append_reflog(target, current, new_oid, identity, action)
-        append_reflog(name, current, new_oid, identity, action) if target != name
+        rollback = yield current if block_given?
+        logs = [target, name].uniq.map { |reference| log_path(reference) }
+        log_sizes = logs.to_h { |path| [path, File.file?(path) ? File.size(path) : nil] }
+        begin
+          file = locks.fetch(ref_path(target))
+          file.write("#{new_oid}\n")
+          sync(file)
+          append_reflog(target, current, new_oid, identity, action)
+          append_reflog(name, current, new_oid, identity, action) if target != name
+          File.rename(file.path, ref_path(target))
+          locks.delete(ref_path(target))
+        rescue StandardError
+          restore_reflogs(log_sizes)
+          rollback.call if rollback.respond_to?(:call)
+          raise
+        end
       end
       new_oid
     end
@@ -146,6 +154,16 @@ module Thuban
         file.write("#{old_oid || ZERO_OID} #{new_oid} #{identity}\t#{action}\n")
         file.flush
         file.fsync
+      end
+    end
+
+    def restore_reflogs(sizes)
+      sizes.each do |path, size|
+        if size
+          File.truncate(path, size)
+        elsif File.file?(path)
+          File.unlink(path)
+        end
       end
     end
 

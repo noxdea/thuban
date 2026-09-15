@@ -24,8 +24,10 @@ module Thuban
       target_tree = tree(target.oid)
       previous = head
       RefStore.new(self).update("HEAD", target.oid, old_oid: previous, message: "reset: moving to #{oid}") do
-        replace_index(target_tree) if mode == :mixed
-        replace_repository_state(target_tree, target_tree) if mode == :hard
+        case mode
+        when :mixed then replace_index(target_tree)
+        when :hard then replace_repository_state(target_tree, target_tree)
+        end
       end
     end
 
@@ -97,7 +99,8 @@ module Thuban
         if same_tree_entry?(ours, original)
           theirs ? result[path] = theirs : result.delete(path)
         elsif !same_tree_entry?(ours, theirs) && !same_tree_entry?(original, theirs)
-          conflicts << path
+          merged = merge_tree_entry(original, ours, theirs)
+          merged ? result[path] = merged : conflicts << path
         end
       end
       raise ArgumentError, "#{action} conflicts: #{conflicts.sort.join(', ')}" unless conflicts.empty?
@@ -112,6 +115,28 @@ module Thuban
       return left.nil? && right.nil? unless left && right
 
       left.oid == right.oid && left.mode == right.mode
+    end
+
+    def merge_tree_entry(base, ours, theirs)
+      entries = [base, ours, theirs]
+      return unless entries.all? && entries.all? { |entry| [0o100644, 0o100755].include?(entry.mode) }
+
+      mode = if ours.mode == base.mode then theirs.mode
+      elsif theirs.mode == base.mode || ours.mode == theirs.mode then ours.mode end
+      return unless mode
+
+      contents = entries.map do |entry|
+        type, content = odb.read(entry.oid)
+        raise CorruptObject, "tree entry is not a blob" unless type == "blob"
+
+        content
+      end
+      return if contents.any? { |content| content.include?("\0") }
+
+      merged = Porrima::Merge.three_way(base: contents[0], ours: contents[1], theirs: contents[2])
+      return unless merged.clean?
+
+      TreeEntry.new(path: ours.path, oid: write_blob(merged.sections.join), mode: mode)
     end
 
     def ensure_clean_tracked_state!
@@ -132,6 +157,7 @@ module Thuban
       affected = (tracked.keys | worktree_tree.keys | remove_paths)
       backups = affected.to_h { |path| [path, worktree_backup(path)] }
       index_path = File.join(git_dir, "index")
+      index_backup = File.file?(index_path) ? [File.binread(index_path), File.stat(index_path).mode & 0o777] : nil
       lock_path = index_path + ".lock"
       begin
         lock = File.open(lock_path, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
@@ -155,6 +181,7 @@ module Thuban
         lock&.close unless lock&.closed?
         File.unlink(lock_path) if owns_lock && File.exist?(lock_path)
       end
+      -> { restore_repository_state(backups, affected, index_path, index_backup) }
     end
 
     def write_worktree_tree(target, contents, removed)
@@ -204,6 +231,15 @@ module Thuban
       end
     end
 
+    def restore_repository_state(backups, affected, index_path, index_backup)
+      restore_worktree(backups, affected)
+      if index_backup
+        atomic_write(index_path, *index_backup)
+      elsif File.file?(index_path) || File.symlink?(index_path)
+        File.unlink(index_path)
+      end
+    end
+
     def check_worktree_collisions(target, current, removed)
       target.each_key do |path|
         absolute = worktree_path(path, replacing: removed)
@@ -231,9 +267,17 @@ module Thuban
 
     def replace_index(target)
       current = index
+      backup = File.file?(current.path) ? [File.binread(current.path), File.stat(current.path).mode & 0o777] : nil
       current.entries.replace(index_entries(target))
       current.extensions.reject! { |extension| Index::ENTRY_DEPENDENT_EXTENSIONS.include?(extension.byteslice(0, 4)) }
       current.write
+      -> do
+        if backup
+          atomic_write(current.path, *backup)
+        elsif File.file?(current.path) || File.symlink?(current.path)
+          File.unlink(current.path)
+        end
+      end
     end
 
     def index_entries(target)

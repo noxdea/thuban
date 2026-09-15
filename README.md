@@ -172,10 +172,11 @@ repo.stash_pop if stash
 ```
 
 Cherry-pick and revert require a clean tracked worktree and accept commits with
-at most one parent. They detect path-level three-way conflicts before changing
-files. Stash uses Git's standard commit and reflog layout, retains staged state,
-and can include untracked files. Worktree-changing operations reject submodules
-and untracked collisions rather than silently deleting data.
+at most one parent. They merge non-overlapping text changes and detect remaining
+three-way conflicts before changing files. Stash uses Git's standard commit and
+reflog layout, retains staged state, and can include untracked files.
+Worktree-changing operations reject submodules and untracked collisions rather
+than silently deleting data.
 
 ### Write Packfiles
 

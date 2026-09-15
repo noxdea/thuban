@@ -19,8 +19,8 @@ Use Git-compatible `.lock` files for index and ref replacement. Ref updates may
 carry an expected old OID and fail with `Thuban::RefLockError` on mismatch.
 
 Build local history operations and stash from the same object, index, and ref
-writers. Apply cherry-pick and revert as path-level three-way changes only when
-the tracked state is clean, and reject merge commits until mainline selection is
+writers. Apply clean text changes with three-way merging only when the tracked
+state is clean, and reject merge commits until mainline selection is
 part of the public API. Store stashes in Git's standard commit and reflog layout.
 Write PACK v2 streams without delta generation; this keeps the first writer
 interoperable while reserving compression heuristics for later measurement.
@@ -32,7 +32,7 @@ milestone.
 
 Objects, indexes, refs, reflogs, commits, stashes, and packs created by Thuban are
 readable by Git. Worktree-changing history operations acquire index and ref
-locks, preflight object reads and collisions, and restore worktree files if index
-replacement fails. Interrupted object creation may leave unreachable objects,
-which Git can safely prune. Remote operations can build on these primitives
-later.
+locks, preflight object reads and collisions, and restore worktree and index data
+if index or metadata replacement fails. Interrupted object creation may leave
+unreachable objects, which Git can safely prune. Remote operations can build on
+these primitives later.

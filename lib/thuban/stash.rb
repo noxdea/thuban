@@ -110,19 +110,29 @@ module Thuban
       end
       unchanged = resolve("refs/stash") == record_oid(records.last) && stash_records == records
       raise RefLockError, "stash changed" unless unchanged
-      yield
-      if kept.empty?
-        File.unlink(ref_path) if File.file?(ref_path)
-        File.unlink(log_path) if File.file?(log_path)
-        return
+      metadata = [ref_path, log_path].to_h do |path|
+        [path, File.file?(path) ? [File.binread(path), File.stat(path).mode & 0o777] : nil]
       end
-
-      locks.fetch(ref_path).write("#{record_oid(kept.last)}\n")
-      locks.fetch(log_path).write(kept.join("\n") + "\n")
-      locks.each_value { |file| file.flush; file.fsync; file.close }
-      [log_path, ref_path].each do |path|
-        File.rename(locks.fetch(path).path, path)
-        locks.delete(path)
+      unless kept.empty?
+        locks.fetch(ref_path).write("#{record_oid(kept.last)}\n")
+        locks.fetch(log_path).write(kept.join("\n") + "\n")
+        locks.each_value { |file| file.flush; file.fsync; file.close }
+      end
+      rollback = yield
+      begin
+        if kept.empty?
+          File.unlink(ref_path) if File.file?(ref_path)
+          File.unlink(log_path) if File.file?(log_path)
+        else
+          [log_path, ref_path].each do |path|
+            File.rename(locks.fetch(path).path, path)
+            locks.delete(path)
+          end
+        end
+      rescue StandardError
+        restore_stash_metadata(metadata)
+        rollback.call if rollback.respond_to?(:call)
+        raise
       end
     rescue Errno::EEXIST => error
       raise RefLockError, "stash is locked: #{error.message}"
@@ -130,6 +140,16 @@ module Thuban
       locks&.each_value do |file|
         file.close unless file.closed?
         File.unlink(file.path) if File.exist?(file.path)
+      end
+    end
+
+    def restore_stash_metadata(metadata)
+      metadata.each do |path, backup|
+        if backup
+          atomic_write(path, *backup)
+        elsif File.file?(path) || File.symlink?(path)
+          File.unlink(path)
+        end
       end
     end
   end

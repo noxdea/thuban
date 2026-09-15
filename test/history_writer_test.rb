@@ -9,7 +9,7 @@ class HistoryWriterTest < Minitest::Test
     git("config", "user.name", "Fixture Author")
     git("config", "user.email", "fixture@example.invalid")
     git("config", "core.autocrlf", "false")
-    write("shared.txt", "base\n")
+    write("shared.txt", "first\nmiddle\nlast\n")
     write("main.txt", "one\n")
     git("add", ".")
     git("commit", "-qm", "Initial")
@@ -78,6 +78,26 @@ class HistoryWriterTest < Minitest::Test
     assert_git_fsck
   end
 
+  def test_cherry_pick_and_revert_merge_non_overlapping_text_changes
+    git("checkout", "-q", "topic")
+    write("shared.txt", "topic\nmiddle\nlast\n")
+    git("commit", "-qam", "Topic text")
+    incoming = git("rev-parse", "HEAD").strip
+    git("checkout", "-q", "main")
+    write("shared.txt", "first\nmiddle\nmain\n")
+    git("commit", "-qam", "Main text")
+
+    picked = @repository.cherry_pick(incoming)
+    assert_equal "topic\nmiddle\nmain\n", File.binread(File.join(@directory, "shared.txt"))
+
+    write("shared.txt", "topic\ncurrent\nmain\n")
+    git("commit", "-qam", "Later text")
+    @repository.revert(picked)
+    assert_equal "first\ncurrent\nmain\n", File.binread(File.join(@directory, "shared.txt"))
+    assert_empty git("status", "--porcelain=v1")
+    assert_git_fsck
+  end
+
   def test_cherry_pick_conflict_and_dirty_state_leave_the_repository_unchanged
     git("checkout", "-qb", "conflict", @base)
     write("shared.txt", "incoming\n")
@@ -142,6 +162,32 @@ class HistoryWriterTest < Minitest::Test
     assert_equal "dirty\n", File.binread(File.join(@directory, "main.txt"))
     assert_equal before_index, File.binread(index_path)
     refute File.exist?(index_path + ".lock")
+  end
+
+  def test_reset_restores_the_worktree_and_index_when_ref_replacement_fails
+    write("main.txt", "dirty\n")
+    git("add", "main.txt")
+    index_path = File.join(@directory, ".git", "index")
+    before_index = File.binread(index_path)
+    before_reflog = git("reflog", "show", "--format=%H %gs")
+    ref_path = File.join(@directory, ".git", "refs", "heads", "main")
+    rename = File.method(:rename)
+    failing = lambda do |source, target|
+      raise Errno::EACCES, target if source == ref_path + ".lock" && target == ref_path
+
+      rename.call(source, target)
+    end
+
+    %i[mixed hard].each do |mode|
+      File.stub(:rename, failing) do
+        assert_raises(Errno::EACCES) { @repository.reset(@base, mode: mode) }
+      end
+      assert_equal @main, @repository.head
+      assert_equal "dirty\n", File.binread(File.join(@directory, "main.txt"))
+      assert_equal before_index, File.binread(index_path)
+      assert_equal before_reflog, git("reflog", "show", "--format=%H %gs")
+      refute File.exist?(ref_path + ".lock")
+    end
   end
 
   private

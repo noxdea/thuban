@@ -130,6 +130,80 @@ class StashTest < Minitest::Test
     assert_equal oid, @repository.stash_list.first.oid
   end
 
+  def test_pop_merges_non_overlapping_text_changes_on_top_of_a_new_head
+    write("merge.txt", "first\nmiddle\nlast\n")
+    git("add", "merge.txt")
+    git("commit", "-qm", "Merge base")
+    write("merge.txt", "stash\nmiddle\nlast\n")
+    oid = @repository.stash_push
+    write("merge.txt", "first\nmiddle\nhead\n")
+    git("commit", "-qam", "New head")
+
+    assert_equal oid, @repository.stash_pop
+    assert_equal "stash\nmiddle\nhead\n", File.binread(path("merge.txt"))
+    assert_equal " M merge.txt\n", git("status", "--porcelain=v1")
+    assert_git_fsck
+  end
+
+  def test_include_untracked_leaves_globally_ignored_files_alone
+    ignore = path(".git/global-ignore")
+    File.binwrite(ignore, "ignored.txt\n")
+    git("config", "core.excludesFile", ignore)
+    write("ignored.txt", "ignored\n")
+    write("visible.txt", "visible\n")
+
+    oid = @repository.stash_push(include_untracked: true)
+    assert File.exist?(path("ignored.txt"))
+    refute File.exist?(path("visible.txt"))
+    assert_equal oid, @repository.stash_pop
+    assert_equal "ignored\n", File.binread(path("ignored.txt"))
+    assert_equal "visible\n", File.binread(path("visible.txt"))
+  end
+
+  def test_push_restores_changes_when_the_stash_ref_cannot_be_replaced
+    write("worktree.txt", "dirty\n")
+    index_path = path(".git/index")
+    before_index = File.binread(index_path)
+    ref_path = path(".git/refs/stash")
+    rename = File.method(:rename)
+    failing = lambda do |source, target|
+      raise Errno::EACCES, target if source == ref_path + ".lock" && target == ref_path
+
+      rename.call(source, target)
+    end
+
+    File.stub(:rename, failing) do
+      assert_raises(Errno::EACCES) { @repository.stash_push }
+    end
+    assert_equal "dirty\n", File.binread(path("worktree.txt"))
+    assert_equal before_index, File.binread(index_path)
+    assert_empty @repository.stash_list
+    assert_empty git("stash", "list")
+    refute File.exist?(ref_path + ".lock")
+  end
+
+  def test_pop_restores_state_when_the_stash_ref_cannot_be_deleted
+    write("worktree.txt", "stashed\n")
+    oid = @repository.stash_push
+    index_path = path(".git/index")
+    before_index = File.binread(index_path)
+    ref_path = path(".git/refs/stash")
+    unlink = File.method(:unlink)
+    failing = lambda do |target|
+      raise Errno::EACCES, target if target == ref_path
+
+      unlink.call(target)
+    end
+
+    File.stub(:unlink, failing) do
+      assert_raises(Errno::EACCES) { @repository.stash_pop }
+    end
+    assert_equal "old worktree\n", File.binread(path("worktree.txt"))
+    assert_equal before_index, File.binread(index_path)
+    assert_equal oid, @repository.stash_list.first.oid
+    assert_equal ["stash@{0}: WIP on main: #{@head[0, 7]} Initial files"], git("stash", "list").lines.map(&:chomp)
+  end
+
   private
 
   def path(relative) = File.join(@directory, relative)
