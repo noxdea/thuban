@@ -23,6 +23,7 @@ module Thuban
         raise RefLockError, "symbolic reference changed: #{name}" unless dereference(name) == target
         current = repository.resolve(target)
         verify_old_oid(name, current, old_oid)
+        yield current if block_given?
         file = locks.fetch(ref_path(target))
         file.write("#{new_oid}\n")
         sync(file)

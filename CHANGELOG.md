@@ -6,6 +6,9 @@
 - Add index mutation with v2/v3/v4 encoding and raw optional-extension preservation
 - Add locked loose and packed ref updates with reflogs and optimistic old-OID checks
 - Add index-to-tree commit creation and amend support
+- Add merge-base, reset, cherry-pick, and revert operations
+- Add Git-compatible stash push, list, and pop operations
+- Add delta-free PACK v2 writing with progress and checksum reporting
 
 ## 0.2.0 - 2026-09-14
 

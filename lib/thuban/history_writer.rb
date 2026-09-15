@@ -7,8 +7,14 @@ module Thuban
       right = require_commit(b).oid
       ancestors = {}
       walk_commits(left) { |oid| ancestors[oid] = true }
-      walk_commits(right) { |oid| return oid if ancestors[oid] }
-      nil
+      common = []
+      walk_commits(right) { |oid| common << oid if ancestors[oid] }
+      common_set = common.to_h { |oid| [oid, true] }
+      inferior = {}
+      common.each do |oid|
+        require_commit(oid).parents.each { |parent| inferior[parent] = true if common_set[parent] }
+      end
+      common.find { |oid| !inferior[oid] }
     end
 
     def reset(oid, mode: :mixed)
@@ -16,9 +22,11 @@ module Thuban
 
       target = require_commit(oid)
       target_tree = tree(target.oid)
-      replace_index(target_tree) if mode == :mixed
-      replace_repository_state(target_tree, target_tree) if mode == :hard
-      update_ref("HEAD", target.oid, old_oid: head, message: "reset: moving to #{oid}")
+      previous = head
+      RefStore.new(self).update("HEAD", target.oid, old_oid: previous, message: "reset: moving to #{oid}") do
+        replace_index(target_tree) if mode == :mixed
+        replace_repository_state(target_tree, target_tree) if mode == :hard
+      end
     end
 
     def cherry_pick(oid)
@@ -49,8 +57,10 @@ module Thuban
     def walk_commits(start)
       queue = [start]
       seen = {}
-      until queue.empty?
-        oid = queue.shift
+      cursor = 0
+      while cursor < queue.length
+        oid = queue[cursor]
+        cursor += 1
         next if seen[oid]
 
         seen[oid] = true
@@ -80,11 +90,13 @@ module Thuban
       raise ArgumentError, "#{action} conflicts: #{conflicts.sort.join(', ')}" unless conflicts.empty?
       raise ArgumentError, "#{action} is empty" if same_tree?(current, result)
 
-      replace_repository_state(result, result)
-      tree_oid = write_tree_from_index
+      tree_oid = write_tree_from_entries(result.values)
       commit_oid = write_commit(tree: tree_oid, parents: [current_oid], author: author,
         committer: operation_signature, message: message)
-      update_ref("HEAD", commit_oid, old_oid: current_oid, message: "#{action}: #{source.message.lines.first.to_s.strip}")
+      RefStore.new(self).update("HEAD", commit_oid, old_oid: current_oid,
+        message: "#{action}: #{source.message.lines.first.to_s.strip}") do
+        replace_repository_state(result, result)
+      end
     end
 
     def same_tree?(left, right)
@@ -103,7 +115,8 @@ module Thuban
 
     def replace_repository_state(worktree_tree, index_tree, remove_paths: [])
       raise ArgumentError, "bare repository has no worktree" unless root
-      current = index.entries.to_h { |entry| [entry.path, entry] }
+      current_index = index
+      current = current_index.entries.to_h { |entry| [entry.path, entry] }
       tracked = head ? tree(head).merge(current) : current
       raise ArgumentError, "submodule updates require separate worktree handling" if
         (tracked.values + worktree_tree.values + index_tree.values).any? { |entry| entry.mode == 0o160000 }
@@ -111,13 +124,41 @@ module Thuban
       removed = (tracked.keys - worktree_tree.keys) | remove_paths
       check_worktree_collisions(worktree_tree, tracked, removed)
       contents = worktree_tree.to_h { |path, entry| [path, odb.read(entry.oid).last] }
+      affected = (tracked.keys | worktree_tree.keys | remove_paths)
+      backups = affected.to_h { |path| [path, worktree_backup(path)] }
+      index_path = File.join(git_dir, "index")
+      lock_path = index_path + ".lock"
+      begin
+        lock = File.open(lock_path, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
+      rescue Errno::EEXIST
+        raise IOError, "Git index is locked: #{lock_path}"
+      end
+      owns_lock = true
+      begin
+        write_worktree_tree(worktree_tree, contents, removed)
+        extensions = current_index.extensions.reject { |extension| Index::ENTRY_DEPENDENT_EXTENSIONS.include?(extension.byteslice(0, 4)) }
+        lock.write(Index.encode(index_entries(index_tree), extensions: extensions, version: current_index.version))
+        lock.flush
+        lock.fsync
+        lock.close
+        File.rename(lock_path, index_path)
+        owns_lock = false
+      rescue StandardError
+        restore_worktree(backups, affected)
+        raise
+      ensure
+        lock&.close unless lock&.closed?
+        File.unlink(lock_path) if owns_lock && File.exist?(lock_path)
+      end
+    end
 
+    def write_worktree_tree(target, contents, removed)
       removed.sort_by { |path| -path.count("/") }.each do |path|
         absolute = worktree_path(path)
         File.unlink(absolute) if File.file?(absolute) || File.symlink?(absolute)
       end
       prune_empty_directories(removed)
-      worktree_tree.sort.each do |path, entry|
+      target.sort.each do |path, entry|
         absolute = worktree_path(path)
         Dir.rmdir(absolute) if File.directory?(absolute) && !File.symlink?(absolute)
         FileUtils.mkdir_p(File.dirname(absolute))
@@ -128,7 +169,34 @@ module Thuban
           atomic_write(absolute, contents.fetch(path), entry.mode & 0o777)
         end
       end
-      replace_index(index_tree)
+    end
+
+    def worktree_backup(path)
+      absolute = worktree_path(path)
+      return [:symlink, File.readlink(absolute).b] if File.symlink?(absolute)
+      return [:file, File.binread(absolute), File.stat(absolute).mode & 0o777] if File.file?(absolute)
+
+      nil
+    end
+
+    def restore_worktree(backups, affected)
+      affected.sort_by { |path| -path.count("/") }.each do |path|
+        absolute = worktree_path(path)
+        File.unlink(absolute) if File.file?(absolute) || File.symlink?(absolute)
+      end
+      prune_empty_directories(affected)
+      backups.each do |path, backup|
+        next unless backup
+
+        absolute = worktree_path(path)
+        Dir.rmdir(absolute) if File.directory?(absolute) && !File.symlink?(absolute)
+        FileUtils.mkdir_p(File.dirname(absolute))
+        if backup[0] == :symlink
+          File.symlink(backup[1], absolute)
+        else
+          atomic_write(absolute, backup[1], backup[2])
+        end
+      end
     end
 
     def check_worktree_collisions(target, current, removed)

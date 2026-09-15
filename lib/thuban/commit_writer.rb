@@ -9,24 +9,6 @@ module Thuban
       write_tree_from_entries(current.entries)
     end
 
-    private
-
-    def write_tree_from_entries(entries)
-      root = {}
-      entries.each do |entry|
-        node = root
-        parts = entry.path.split("/")
-        raise ArgumentError, "index path nesting exceeds limit" if parts.length > 256
-        parts[0...-1].each do |part|
-          raise ArgumentError, "index contains a file/directory collision" if node.key?(part) && !node[part].is_a?(Hash)
-          node = node[part] ||= {}
-        end
-        raise ArgumentError, "index contains duplicate or colliding paths" if node.key?(parts.last)
-        node[parts.last] = entry
-      end
-      write_index_tree(root)
-    end
-
     def commit!(message:, author:, amend: false)
       previous = head
       current = previous && commit(previous)
@@ -44,6 +26,24 @@ module Thuban
       end
       update_ref("HEAD", oid, old_oid: previous, message: action)
       oid
+    end
+
+    private
+
+    def write_tree_from_entries(entries)
+      root = {}
+      entries.each do |entry|
+        node = root
+        parts = entry.path.split("/")
+        raise ArgumentError, "index path nesting exceeds limit" if parts.length > 256
+        parts[0...-1].each do |part|
+          raise ArgumentError, "index contains a file/directory collision" if node.key?(part) && !node[part].is_a?(Hash)
+          node = node[part] ||= {}
+        end
+        raise ArgumentError, "index contains duplicate or colliding paths" if node.key?(parts.last)
+        node[parts.last] = entry
+      end
+      write_index_tree(root)
     end
 
     def write_index_tree(node)

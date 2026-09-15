@@ -18,6 +18,10 @@ class CommitWriterTest < Minitest::Test
 
   def teardown = FileUtils.remove_entry(@directory)
 
+  def test_commit_operation_remains_public
+    assert_respond_to @repository, :commit!
+  end
+
   def test_builds_nested_trees_and_commits_the_index
     write("dir/nested.txt", "nested\n")
     write("script.sh", "#!/bin/sh\n")

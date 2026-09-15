@@ -32,6 +32,10 @@ class HistoryWriterTest < Minitest::Test
     assert_equal git("merge-base", "main", "topic").strip, @repository.merge_base("main", "topic")
     assert_equal git("merge-base", @base, "main").strip, @repository.merge_base(@base, "main")
     assert_nil @repository.merge_base(unrelated_commit, "main")
+
+    descendant = commit_object(@base, "Descendant")
+    redundant_merge = commit_object(@base, "Redundant merge", parents: [@base, descendant])
+    assert_equal git("merge-base", descendant, redundant_merge).strip, @repository.merge_base(descendant, redundant_merge)
   end
 
   def test_soft_mixed_and_hard_reset_match_git_state
@@ -94,12 +98,63 @@ class HistoryWriterTest < Minitest::Test
     assert_equal current, @repository.head
   end
 
+  def test_reset_does_not_change_state_when_the_reference_is_locked
+    write("main.txt", "dirty\n")
+    git("add", "main.txt")
+    before_index = File.binread(File.join(@directory, ".git", "index"))
+    lock = File.join(@directory, ".git", "refs", "heads", "main.lock")
+    File.binwrite(lock, "held")
+
+    assert_raises(Thuban::RefLockError) { @repository.reset(@base, mode: :hard) }
+    assert_equal @main, @repository.head
+    assert_equal "dirty\n", File.binread(File.join(@directory, "main.txt"))
+    assert_equal before_index, File.binread(File.join(@directory, ".git", "index"))
+    assert_equal "held", File.binread(lock)
+  end
+
+  def test_hard_reset_does_not_change_state_when_the_index_is_locked
+    write("main.txt", "dirty\n")
+    before = @repository.head
+    lock = File.join(@directory, ".git", "index.lock")
+    File.binwrite(lock, "held")
+
+    assert_raises(IOError) { @repository.reset(@base, mode: :hard) }
+    assert_equal before, @repository.head
+    assert_equal "dirty\n", File.binread(File.join(@directory, "main.txt"))
+    assert_equal "held", File.binread(lock)
+  end
+
+  def test_hard_reset_restores_the_worktree_when_index_replacement_fails
+    write("main.txt", "dirty\n")
+    index_path = File.join(@directory, ".git", "index")
+    before_index = File.binread(index_path)
+    rename = File.method(:rename)
+    failing = lambda do |source, target|
+      raise Errno::EACCES, target if source == index_path + ".lock" && target == index_path
+
+      rename.call(source, target)
+    end
+
+    File.stub(:rename, failing) do
+      assert_raises(Errno::EACCES) { @repository.reset(@base, mode: :hard) }
+    end
+    assert_equal @main, @repository.head
+    assert_equal "dirty\n", File.binread(File.join(@directory, "main.txt"))
+    assert_equal before_index, File.binread(index_path)
+    refute File.exist?(index_path + ".lock")
+  end
+
   private
 
   def unrelated_commit
     tree = @repository.write_tree([])
     signature = Thuban::Signature.new(name: "Other", email: "other@example.invalid", time: 1, offset: "+0000")
     @repository.write_commit(tree: tree, author: signature, message: "Unrelated")
+  end
+
+  def commit_object(parent, message, parents: [parent])
+    signature = Thuban::Signature.new(name: "Fixture", email: "fixture@example.invalid", time: 1, offset: "+0000")
+    @repository.write_commit(tree: @repository.commit(parent).tree, parents: parents, author: signature, message: message)
   end
 
   def write(path, content)

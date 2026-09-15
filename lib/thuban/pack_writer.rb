@@ -63,8 +63,10 @@ module Thuban
     def self.write_all(io, bytes)
       offset = 0
       while offset < bytes.bytesize
-        written = io.write(bytes.byteslice(offset..))
-        raise IOError, "pack output stopped accepting bytes" unless written.is_a?(Integer) && written.positive?
+        remaining = bytes.bytesize - offset
+        written = io.write(bytes.byteslice(offset, remaining))
+        valid = written.is_a?(Integer) && written.positive? && written <= remaining
+        raise IOError, "pack output stopped accepting bytes" unless valid
 
         offset += written
       end

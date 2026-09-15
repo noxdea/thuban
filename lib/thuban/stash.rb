@@ -27,8 +27,9 @@ module Thuban
       end
       worktree_tree = write_tree_from_entries(worktree_entries((tree(current_head).keys | current_index.entries.map(&:path))))
       oid = write_commit(tree: worktree_tree, parents: parents, author: identity, message: stash_message)
-      update_ref("refs/stash", oid, old_oid: resolve("refs/stash"), message: stash_message)
-      replace_repository_state(tree(current_head), tree(current_head), remove_paths: include_untracked ? untracked : [])
+      RefStore.new(self).update("refs/stash", oid, old_oid: resolve("refs/stash"), message: stash_message) do
+        replace_repository_state(tree(current_head), tree(current_head), remove_paths: include_untracked ? untracked : [])
+      end
       oid
     end
 
@@ -50,8 +51,7 @@ module Thuban
       worktree_tree = tree(stored.oid)
       worktree_tree = worktree_tree.merge(tree(stored.parents[2])) if stored.parents[2]
       index_tree = tree(stored.parents[1])
-      replace_repository_state(worktree_tree, index_tree)
-      drop_stash(records, position, oid)
+      drop_stash(records, position) { replace_repository_state(worktree_tree, index_tree) }
       oid
     end
 
@@ -75,7 +75,10 @@ module Thuban
 
     def stash_records
       path = File.join(common_dir, "logs", "refs", "stash")
-      File.file?(path) ? File.readlines(path, chomp: true, encoding: Encoding::BINARY) : []
+      return [] unless File.file?(path)
+
+      RefStore.new(self).send(:validate_storage_path, path)
+      File.readlines(path, chomp: true, encoding: Encoding::BINARY)
     end
 
     def record_oid(record)
@@ -85,21 +88,25 @@ module Thuban
       oid
     end
 
-    def drop_stash(records, position, oid)
+    def drop_stash(records, position)
       kept = records.dup
       kept.delete_at(position)
-      if kept.empty?
-        delete_ref("refs/stash", old_oid: oid)
-        return
-      end
-
       ref_path = File.join(common_dir, "refs", "stash")
       log_path = File.join(common_dir, "logs", "refs", "stash")
       locks = {}
       [ref_path, log_path].sort.each do |path|
-        FileUtils.mkdir_p(File.dirname(path))
+        RefStore.new(self).send(:prepare_storage_path, path)
         locks[path] = File.open(path + ".lock", File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
       end
+      unchanged = resolve("refs/stash") == record_oid(records.last) && stash_records == records
+      raise RefLockError, "stash changed" unless unchanged
+      yield
+      if kept.empty?
+        File.unlink(ref_path) if File.file?(ref_path)
+        File.unlink(log_path) if File.file?(log_path)
+        return
+      end
+
       locks.fetch(ref_path).write("#{record_oid(kept.last)}\n")
       locks.fetch(log_path).write(kept.join("\n") + "\n")
       locks.each_value { |file| file.flush; file.fsync; file.close }

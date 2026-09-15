@@ -32,6 +32,8 @@ executable.
 - Resolves refs, branches, commits, trees, and blobs
 - Reads the index and reports staged, worktree, and untracked changes
 - Writes loose objects, index entries, refs, reflogs, trees, and commits
+- Finds merge bases and performs reset, cherry-pick, revert, and stash operations
+- Writes interoperable delta-free Git packfiles to any writable IO
 - Tracks line history across commits and renames with blame
 - Writes files atomically and checks out branches with collision guards
 - Supports linked worktrees and packed refs
@@ -154,6 +156,44 @@ Ref mutations use `.lock` files and raise `Thuban::RefLockError` when a lock is
 held or the expected old OID no longer matches. Loose updates override packed
 refs, and deletion removes both forms.
 
+### History and Stash
+
+Use the same branch names, tags, or full object IDs accepted by the read API:
+
+```ruby
+base = repo.merge_base("main", "topic")
+repo.reset(base, mode: :mixed) # :soft and :hard are also supported
+picked = repo.cherry_pick("topic")
+repo.revert(picked)
+
+stash = repo.stash_push(message: "before refactor", include_untracked: true)
+repo.stash_list # newest first, as Commit objects
+repo.stash_pop if stash
+```
+
+Cherry-pick and revert require a clean tracked worktree and accept commits with
+at most one parent. They detect path-level three-way conflicts before changing
+files. Stash uses Git's standard commit and reflog layout, retains staged state,
+and can include untracked files. Worktree-changing operations reject submodules
+and untracked collisions rather than silently deleting data.
+
+### Write Packfiles
+
+`Pack.write` accepts `[type, data]` object pairs, reports completed objects to an
+optional block, and returns the hexadecimal pack checksum:
+
+```ruby
+objects = object_ids.map { |oid| repo.object(oid) }
+File.open("out.pack", "wb") do |file|
+  checksum = Thuban::Pack.write(file, objects) do |current, total|
+    warn "#{current}/#{total}"
+  end
+end
+```
+
+The emitted PACK v2 stream stores complete compressed objects without delta
+generation. It can be consumed by `git index-pack` and `git verify-pack`.
+
 ### Match Ignored Paths
 
 Load Git's global excludes, `.git/info/exclude`, and nested `.gitignore` files.
@@ -174,10 +214,10 @@ continuations, and command-scoped overrides are not evaluated.
 ## Scope
 
 The current write API covers loose objects, the index, refs, reflogs, commits,
-and guarded checkout. Thuban does not yet perform network operations, pack
-writes, merge, reset, cherry-pick, revert, or stash. It does not provide its own
-diff algorithm; blame delegates line matching to Porrima through the injectable
-`differ:` argument.
+guarded checkout, local history operations, stash, and delta-free pack output.
+Thuban does not yet perform network operations, merges, pack delta generation,
+or streaming pack ingestion. It does not provide its own diff algorithm; blame
+delegates line matching to Porrima through the injectable `differ:` argument.
 
 Support is limited to the index and pack formats covered by the test suite.
 Submodule checkout and optional Git extensions outside that coverage are not
@@ -191,6 +231,7 @@ bundle exec rake
 ruby tools/check_isolation.rb
 bundle exec rbs -I sig -r porrima validate
 gem build --strict thuban.gemspec
+ruby bench/pack_write.rb --assert
 ```
 
 ## Contributing

@@ -86,6 +86,23 @@ class StashTest < Minitest::Test
     assert_equal "replacement\n", File.binread(path("untracked.txt"))
   end
 
+  def test_locks_prevent_push_or_pop_from_changing_the_worktree
+    write("worktree.txt", "push change\n")
+    ref_lock = path(".git/refs/stash.lock")
+    File.binwrite(ref_lock, "held")
+    assert_raises(Thuban::RefLockError) { @repository.stash_push }
+    assert_equal "push change\n", File.binread(path("worktree.txt"))
+    File.unlink(ref_lock)
+
+    oid = @repository.stash_push
+    log_lock = path(".git/logs/refs/stash.lock")
+    File.binwrite(log_lock, "held")
+    assert_raises(Thuban::RefLockError) { @repository.stash_pop }
+    assert_equal "old worktree\n", File.binread(path("worktree.txt"))
+    assert_equal oid, @repository.stash_list.first.oid
+    assert_equal "held", File.binread(log_lock)
+  end
+
   private
 
   def path(relative) = File.join(@directory, relative)
