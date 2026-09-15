@@ -83,6 +83,8 @@ module Thuban
     def delete_branch: (String name) -> String
     def symbolic_ref: (String name, String target) -> String
     def reflog: (String name) -> Array[String]
+    def write_tree_from_index: () -> String
+    def commit!: (message: String, author: Signature, ?amend: bool) -> String
   end
 
   class ObjectDatabase
