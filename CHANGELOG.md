@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-09-17
+
 - Expose parsed commit signatures and separate author and committer identities in `commit!`
 - Add current author and committer identity lookup with `Repository#signature`
 - Add bounded commit history traversal with `Repository#each_commit`
