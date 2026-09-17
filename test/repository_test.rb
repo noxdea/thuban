@@ -94,6 +94,56 @@ class RepositoryTest < Minitest::Test
     assert_equal "role must be :author or :committer", error.message
   end
 
+  def test_filemode_uses_git_boolean_values_and_worktree_configuration
+    git("config", "--unset-all", "core.filemode")
+    environment = {
+      "GIT_CONFIG_NOSYSTEM" => "1",
+      "GIT_CONFIG_GLOBAL" => File.join(@directory, "missing-global-config")
+    }
+    with_environment(environment) do
+      assert @repository.filemode?
+      %w[false no off 0].each do |value|
+        git("config", "core.filemode", value)
+        refute @repository.filemode?, value
+      end
+
+      git("config", "core.filemode", "true")
+      git("config", "extensions.worktreeConfig", "true")
+      linked = File.join(@directory, "linked")
+      git("worktree", "add", "-q", "-b", "linked", linked)
+      other = Thuban::Repository.new(linked)
+      File.binwrite(File.join(other.git_dir, "config.worktree"), "[core]\n filemode = false\n")
+      assert @repository.filemode?
+      refute other.filemode?
+    end
+  end
+
+  def test_status_honors_core_filemode
+    path = File.join(@directory, "text.txt")
+    git("config", "core.filemode", "true")
+    File.chmod(0o755, path)
+    skip "filesystem does not expose executable bits" unless (File.stat(path).mode & 0o100).positive?
+
+    assert_equal " M", @repository.status.find { |entry| entry.path == "text.txt" }.code
+    git("config", "core.filemode", "false")
+    assert_empty @repository.status
+  end
+
+  def test_status_detects_content_changes_when_filemode_is_disabled
+    path = File.join(@directory, "text.txt")
+    git("config", "core.filemode", "false")
+    File.binwrite(path, "content changed\n")
+    assert_equal " M", @repository.status.find { |entry| entry.path == "text.txt" }.code
+  end
+
+  def test_status_does_not_hide_type_changes_when_filemode_is_disabled
+    path = File.join(@directory, "text.txt")
+    git("config", "core.filemode", "false")
+    File.unlink(path)
+    File.symlink("missing.txt", path)
+    assert_equal " T", @repository.status.find { |entry| entry.path == "text.txt" }.code
+  end
+
   def test_blame_tracks_changes_and_renames
     write("text.txt", "first\nchanged\nthird\n")
     git("add", ".")

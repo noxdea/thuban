@@ -14,6 +14,7 @@ module Thuban
       repository = @repository
       index = repository.index
       head = repository.tree
+      filemode = repository.filemode?
       tracked = index.entries.group_by(&:path)
       result = []
       (head.keys | tracked.keys).sort.each do |path|
@@ -30,7 +31,7 @@ module Thuban
         elsif !staged then "D"
         elsif original.mode != staged.mode || original.oid != staged.oid then "M"
         else " " end
-        y = staged ? worktree_status(staged, index.path) : " "
+        y = staged ? worktree_status(staged, index.path, filemode) : " "
         result << Entry.new(path: path, index: x, worktree: y) unless x == " " && y == " "
       end
       submodules = index.entries.select { |entry| entry.mode == 0o160000 }.map { |entry| entry.path + "/" }
@@ -43,7 +44,7 @@ module Thuban
 
     private
 
-    def worktree_status(entry, index_path)
+    def worktree_status(entry, index_path, filemode)
       absolute = @repository.worktree_path(entry.path)
       stat = File.lstat(absolute)
       if entry.mode == 0o160000
@@ -56,7 +57,7 @@ module Thuban
       end
       mode = stat.symlink? ? 0o120000 : stat.file? ? 0o100000 | ((stat.mode & 0o100).positive? ? 0o755 : 0o644) : 0
       return "T" if (mode & 0o170000) != (entry.mode & 0o170000)
-      return "M" if mode != entry.mode
+      return "M" if filemode && mode != entry.mode
       return " " if (entry.extended_flags.to_i & 0x4000).positive? # skip-worktree
       index_time = File.mtime(index_path)
       if stat.size == entry.size && stat.mtime.to_i == entry.mtime && stat.mtime.nsec == entry.mtime_nsec &&

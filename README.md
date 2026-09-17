@@ -76,6 +76,9 @@ repo.status.each do |entry|
 end
 ```
 
+Status checks honor the repository's `core.filemode` setting; `repo.filemode?`
+exposes the effective value.
+
 ## Usage
 
 ### Read Repository Data

@@ -40,6 +40,10 @@ module Thuban
       current_signature(role, fallback: false)
     end
 
+    def filemode?
+      !%w[false no off 0].include?(git_config_value("core", "filemode").to_s.downcase)
+    end
+
     def branch
       text = File.read(File.join(git_dir, "HEAD")).strip
       text.start_with?("ref: refs/heads/") ? text.delete_prefix("ref: refs/heads/") : nil
@@ -263,8 +267,8 @@ module Thuban
       when :committer then "GIT_COMMITTER"
       else raise ArgumentError, "role must be :author or :committer"
       end
-      name = ENV["#{prefix}_NAME"] || identity_config_value("name")
-      email = ENV["#{prefix}_EMAIL"] || identity_config_value("email")
+      name = ENV["#{prefix}_NAME"] || git_config_value("user", "name")
+      email = ENV["#{prefix}_EMAIL"] || git_config_value("user", "email")
       if fallback
         name ||= ENV["USER"] || "unknown"
         email ||= "unknown@localhost"
@@ -278,10 +282,10 @@ module Thuban
       value
     end
 
-    def identity_config_value(key)
+    def git_config_value(section, key)
       files = IgnoreMatcher.send(:git_config_files, root || common_dir)
       files << File.join(common_dir, "config") unless root
-      files.uniq.filter_map { |path| IgnoreMatcher.send(:config_value, path, "user", key) }.last
+      files.uniq.filter_map { |path| IgnoreMatcher.send(:config_value, path, section, key) }.last
     end
 
     def prune_empty_directories(paths)
