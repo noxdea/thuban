@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Expose parsed commit signatures and separate author and committer identities in `commit!`
+
 ## 0.4.1 - 2026-09-17
 
 - Load remote transport providers only when remote operations are used

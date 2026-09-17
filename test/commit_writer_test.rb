@@ -56,6 +56,26 @@ class CommitWriterTest < Minitest::Test
     assert_git_fsck
   end
 
+  def test_amend_can_preserve_the_author_and_update_the_committer
+    original = @repository.commit
+    author = original.signature(role: :author)
+    committer = Thuban::Signature.new(name: "Current User", email: "current@example.invalid", time: 1_800_000_000, offset: "-0430")
+
+    amended = @repository.commit!(message: "Amended identity", author: author, committer: committer, amend: true)
+    commit = @repository.commit(amended)
+
+    assert_equal original.author, commit.author
+    assert_equal "Current User <current@example.invalid> 1800000000 -0430", commit.committer
+    assert_equal author, commit.signature
+    assert_equal committer, commit.signature(role: :committer)
+    assert_git_fsck
+  end
+
+  def test_rejects_an_invalid_signature_role
+    error = assert_raises(ArgumentError) { @repository.commit.signature(role: :reviewer) }
+    assert_equal "role must be :author or :committer", error.message
+  end
+
   def test_commits_on_a_detached_head_without_advancing_a_branch
     git("checkout", "--detach", "-q")
     oid = @repository.commit!(message: "Detached", author: @signature)

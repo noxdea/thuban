@@ -85,6 +85,7 @@ module Thuban
     attr_accessor committer: String?
     attr_accessor message: String
     def self.new: (oid: String, ?tree: String?, parents: Array[String], ?author: String?, ?committer: String?, message: String) -> instance
+    def signature: (?role: :author | :committer) -> Signature
   end
 
   class TreeEntry < Struct[untyped]
@@ -149,7 +150,7 @@ module Thuban
     def symbolic_ref: (String name, String target) -> String
     def reflog: (String name) -> Array[String]
     def write_tree_from_index: () -> String
-    def commit!: (message: String, author: Signature, ?amend: bool) -> String
+    def commit!: (message: String, author: Signature, ?committer: Signature?, ?amend: bool) -> String
     def merge_base: (String a, String b) -> String?
     def reset: (String oid, ?mode: :soft | :mixed | :hard) -> String
     def cherry_pick: (String oid) -> String

@@ -143,6 +143,15 @@ author = Thuban::Signature.new(
 commit = repo.commit!(message: "Update README", author: author)
 ```
 
+To amend without changing the original author or author timestamp, read the
+author signature from the commit and provide a separate current committer:
+
+```ruby
+original = repo.commit
+committer = Thuban::Signature.new(name: "Current User", email: "user@example.com", time: Time.now)
+repo.commit!(message: "Update README", author: original.signature(role: :author), committer: committer, amend: true)
+```
+
 `Index#write` uses Git's `index.lock`, retains optional extensions as raw bytes,
 and invalidates entry-dependent cache extensions after mutation. `unstage`
 removes the stage-zero entry; stage the corresponding HEAD entry to restore a

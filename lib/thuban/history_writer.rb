@@ -36,7 +36,7 @@ module Thuban
       raise ArgumentError, "cannot cherry-pick a merge commit" if source.parents.length > 1
 
       base = source.parents.empty? ? {} : tree(source.parents.first)
-      apply_commit_change(source, base, tree(source.oid), author: signature_from(source.author), message: source.message,
+      apply_commit_change(source, base, tree(source.oid), author: source.signature(role: :author), message: source.message,
         action: "cherry-pick")
     end
 
@@ -301,13 +301,6 @@ module Thuban
       stat if ObjectDatabase.hash("blob", content) == entry.oid
     rescue Errno::ENOENT, Errno::ENOTDIR
       nil
-    end
-
-    def signature_from(value)
-      match = value.to_s.match(/\A(.+) <([^<>]+)> (-?\d+) ([+-]\d{4})\z/)
-      raise CorruptObject, "invalid commit signature" unless match
-
-      Signature.new(name: match[1], email: match[2], time: Integer(match[3]), offset: match[4])
     end
 
     def operation_signature

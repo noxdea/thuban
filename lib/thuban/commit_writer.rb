@@ -9,13 +9,13 @@ module Thuban
       write_tree_from_entries(current.entries)
     end
 
-    def commit!(message:, author:, amend: false)
+    def commit!(message:, author:, committer: nil, amend: false)
       previous = head
       current = previous && commit(previous)
       raise ArgumentError, "cannot amend an unborn branch" if amend && !current
 
       parents = amend ? current.parents : previous ? [previous] : []
-      oid = write_commit(tree: write_tree_from_index, parents: parents, author: author, message: message)
+      oid = write_commit(tree: write_tree_from_index, parents: parents, author: author, committer: committer, message: message)
       subject = message.lines.first.to_s.strip
       action = if amend
         "commit (amend): #{subject}"
