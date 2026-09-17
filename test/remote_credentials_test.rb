@@ -211,16 +211,24 @@ class RemoteCredentialsTest < Minitest::Test
     waiter = Struct.new(:pid) do
       def join(*) = true
     end.new(1234)
+    commands = []
     signals = []
 
-    Process.stub(:kill, ->(signal, pid) { signals << [signal, pid] }) do
-      helper.send(:terminate, waiter, false)
+    helper.stub(:system, ->(*arguments, **options) { commands << [arguments, options]; true }) do
+      Process.stub(:kill, ->(signal, pid) { signals << [signal, pid] }) do
+        helper.send(:terminate, waiter, false)
+      end
     end
 
-    assert_equal [["KILL", 1234]], signals
-    Process.stub(:kill, ->(*) { raise Errno::EINVAL }) do
-      helper.send(:terminate, waiter, false)
+    assert_equal [[%w[taskkill /PID 1234 /T /F], {out: File::NULL, err: File::NULL}]], commands
+    assert_empty signals
+
+    helper.stub(:system, false) do
+      Process.stub(:kill, ->(signal, pid) { signals << [signal, pid] }) do
+        helper.send(:terminate, waiter, false)
+      end
     end
+    assert_equal [["KILL", 1234]], signals
   end
 
   def test_redirect_does_not_forward_authorization

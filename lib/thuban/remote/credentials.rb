@@ -125,7 +125,8 @@ module Thuban
 
         def terminate(waiter, grouped)
           unless grouped
-            Process.kill("KILL", waiter.pid)
+            killed = system("taskkill", "/PID", waiter.pid.to_s, "/T", "/F", out: File::NULL, err: File::NULL)
+            Process.kill("KILL", waiter.pid) unless killed
             waiter.join
             return
           end
