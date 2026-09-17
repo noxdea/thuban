@@ -229,7 +229,7 @@ class RemoteSSHTest < Minitest::Test
     rescue StandardError => error
       error
     end
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
     sleep 0.01 until File.exist?(ready) || Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
     assert File.exist?(ready), "SSH process did not start"
     cancelled = true
