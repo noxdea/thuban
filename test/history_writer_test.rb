@@ -83,6 +83,21 @@ class HistoryWriterTest < Minitest::Test
     assert_git_fsck
   end
 
+  def test_cherry_pick_keeps_the_internal_identity_fallback
+    git("config", "--unset-all", "user.name")
+    git("config", "--unset-all", "user.email")
+    environment = {
+      "GIT_CONFIG_NOSYSTEM" => "1",
+      "GIT_CONFIG_GLOBAL" => File.join(@directory, "missing-global-config"),
+      "GIT_COMMITTER_NAME" => nil,
+      "GIT_COMMITTER_EMAIL" => nil
+    }
+    with_environment(environment) do
+      picked = @repository.cherry_pick(@topic)
+      assert_equal "unknown@localhost", @repository.commit(picked).signature(role: :committer).email
+    end
+  end
+
   def test_revert_reverses_a_commit_and_records_a_git_readable_commit
     picked = @repository.cherry_pick(@topic)
     reverted = @repository.revert(picked)
@@ -223,6 +238,14 @@ class HistoryWriterTest < Minitest::Test
     absolute = File.join(@directory, path)
     FileUtils.mkdir_p(File.dirname(absolute))
     File.binwrite(absolute, content)
+  end
+
+  def with_environment(values)
+    previous = values.to_h { |key, _| [key, ENV[key]] }
+    values.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
+    yield
+  ensure
+    previous.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
   end
 
   def git(*arguments, env: {})

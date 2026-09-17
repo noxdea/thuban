@@ -36,6 +36,10 @@ module Thuban
     def index = Index.new(File.join(git_dir, "index"))
     def head = resolve("HEAD")
 
+    def signature(role: :author)
+      current_signature(role, fallback: false)
+    end
+
     def branch
       text = File.read(File.join(git_dir, "HEAD")).strip
       text.start_with?("ref: refs/heads/") ? text.delete_prefix("ref: refs/heads/") : nil
@@ -252,6 +256,33 @@ module Thuban
     end
 
     private
+
+    def current_signature(role, fallback:)
+      prefix = case role
+      when :author then "GIT_AUTHOR"
+      when :committer then "GIT_COMMITTER"
+      else raise ArgumentError, "role must be :author or :committer"
+      end
+      name = ENV["#{prefix}_NAME"] || identity_config_value("name")
+      email = ENV["#{prefix}_EMAIL"] || identity_config_value("email")
+      if fallback
+        name ||= ENV["USER"] || "unknown"
+        email ||= "unknown@localhost"
+      end
+      missing = {name: name, email: email}.filter_map { |key, value| key if value.nil? || value.empty? }
+      raise ArgumentError, "Git #{role} identity is missing #{missing.join(' and ')}" unless missing.empty?
+
+      now = Time.now
+      value = Signature.new(name: name, email: email, time: now, offset: now.utc_offset)
+      format_signature(value)
+      value
+    end
+
+    def identity_config_value(key)
+      files = IgnoreMatcher.send(:git_config_files, root || common_dir)
+      files << File.join(common_dir, "config") unless root
+      files.uniq.filter_map { |path| IgnoreMatcher.send(:config_value, path, "user", key) }.last
+    end
 
     def prune_empty_directories(paths)
       paths.sort_by { |path| -path.count("/") }.each do |path|

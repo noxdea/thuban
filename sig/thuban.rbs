@@ -127,6 +127,7 @@ module Thuban
     def index: () -> Index
     def head: () -> String?
     def branch: () -> String?
+    def signature: (?role: :author | :committer) -> Signature
     def refs: () -> Hash[String, String?]
     def branches: () -> Array[String]
     def resolve: (String name, ?Array[String] seen) -> String?

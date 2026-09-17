@@ -168,8 +168,7 @@ module Thuban
     end
 
     def reflog_signature
-      Signature.new(name: ENV["GIT_COMMITTER_NAME"] || config_value("name") || ENV["USER"] || "unknown",
-        email: ENV["GIT_COMMITTER_EMAIL"] || config_value("email") || "unknown@localhost", time: Time.now)
+      repository.send(:current_signature, :committer, fallback: true)
     end
 
     def validate_storage_path(path)
@@ -209,21 +208,6 @@ module Thuban
       raise ArgumentError, "unsafe Git metadata path" unless root
 
       root
-    end
-
-    def config_value(key)
-      section = nil
-      File.foreach(File.join(repository.common_dir, "config"), encoding: "UTF-8") do |line|
-        stripped = line.strip
-        if (section_match = stripped.match(/\A\[\s*([^\s\]"]+)/))
-          section = section_match[1].downcase
-        elsif section == "user" && (value_match = stripped.match(/\A#{key}\s*=\s*(.*)\z/i))
-          return value_match[1].strip.delete_prefix("\"").delete_suffix("\"")
-        end
-      end
-      nil
-    rescue Errno::ENOENT, Errno::EACCES
-      nil
     end
 
     def rewrite_packed_refs(file, path, name)

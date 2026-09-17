@@ -55,6 +55,45 @@ class RepositoryTest < Minitest::Test
     assert_raises(ArgumentError) { @repository.resolve("../../config") }
   end
 
+  def test_current_author_and_committer_signatures
+    author = @repository.signature
+    assert_equal ["Fixture Author", "fixture@example.invalid"], [author.name, author.email]
+    assert_instance_of Time, author.time
+    assert_equal author.time.utc_offset, author.offset
+
+    environment = {
+      "GIT_AUTHOR_NAME" => "Environment Author",
+      "GIT_AUTHOR_EMAIL" => "author@example.invalid",
+      "GIT_COMMITTER_NAME" => "Environment Committer",
+      "GIT_COMMITTER_EMAIL" => "committer@example.invalid"
+    }
+    with_environment(environment) do
+      author = @repository.signature(role: :author)
+      committer = @repository.signature(role: :committer)
+      assert_equal ["Environment Author", "author@example.invalid"],
+        [author.name, author.email]
+      assert_equal ["Environment Committer", "committer@example.invalid"],
+        [committer.name, committer.email]
+    end
+  end
+
+  def test_signature_rejects_missing_identity_and_invalid_role
+    git("config", "--unset-all", "user.name")
+    git("config", "--unset-all", "user.email")
+    environment = {
+      "GIT_CONFIG_NOSYSTEM" => "1",
+      "GIT_CONFIG_GLOBAL" => File.join(@directory, "missing-global-config"),
+      "GIT_AUTHOR_NAME" => nil,
+      "GIT_AUTHOR_EMAIL" => nil
+    }
+    with_environment(environment) do
+      error = assert_raises(ArgumentError) { @repository.signature }
+      assert_equal "Git author identity is missing name and email", error.message
+    end
+    error = assert_raises(ArgumentError) { @repository.signature(role: :reviewer) }
+    assert_equal "role must be :author or :committer", error.message
+  end
+
   def test_blame_tracks_changes_and_renames
     write("text.txt", "first\nchanged\nthird\n")
     git("add", ".")
@@ -169,6 +208,14 @@ class RepositoryTest < Minitest::Test
     end
     write(".git/refs/heads/main", "#{parent}\n")
     assert_equal [@first, @first, @first], @repository.blame("text.txt").map(&:commit)
+  end
+
+  def with_environment(values)
+    previous = values.to_h { |key, _| [key, ENV[key]] }
+    values.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
+    yield
+  ensure
+    previous.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
   end
 
 end

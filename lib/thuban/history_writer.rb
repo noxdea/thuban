@@ -317,7 +317,7 @@ module Thuban
     end
 
     def operation_signature
-      RefStore.new(self).send(:reflog_signature)
+      current_signature(:committer, fallback: true)
     end
   end
 end

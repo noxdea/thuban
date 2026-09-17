@@ -140,20 +140,22 @@ index = repo.index
 index.stage(path, oid, 0o100644, stat: File.stat(path))
 index.write
 
-author = Thuban::Signature.new(
-  name: "Example Author",
-  email: "author@example.com",
-  time: Time.now
-)
+author = repo.signature(role: :author)
 commit = repo.commit!(message: "Update README", author: author)
 ```
+
+`Repository#signature` reads the matching `GIT_AUTHOR_NAME` /
+`GIT_AUTHOR_EMAIL` or `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` first,
+then `user.name` / `user.email` from Git configuration. It returns the current
+time and UTC offset and raises `ArgumentError` when either identity value is
+missing or invalid.
 
 To amend without changing the original author or author timestamp, read the
 author signature from the commit and provide a separate current committer:
 
 ```ruby
 original = repo.commit
-committer = Thuban::Signature.new(name: "Current User", email: "user@example.com", time: Time.now)
+committer = repo.signature(role: :committer)
 repo.commit!(message: "Update README", author: original.signature(role: :author), committer: committer, amend: true)
 ```
 
