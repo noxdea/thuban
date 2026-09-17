@@ -28,6 +28,7 @@ class IndexWriterTest < Minitest::Test
 
     assert_equal ["A  added.txt", "M  tracked.txt"], git("status", "--porcelain=v1").lines.map(&:chomp).sort
     assert_equal added, git("rev-parse", ":added.txt").strip
+    index = @repository.index
     index.remove("added.txt")
     index.unstage("tracked.txt")
     index.write
