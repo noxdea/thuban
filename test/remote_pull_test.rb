@@ -11,14 +11,16 @@ class RemotePullTest < Minitest::Test
     git(@source, "init", "-q", "-b", "main")
     git(@source, "config", "user.name", "Fixture")
     git(@source, "config", "user.email", "fixture@example.invalid")
+    git(@source, "config", "core.autocrlf", "false")
     File.binwrite(File.join(@source, "tracked.txt"), "first\n")
     git(@source, "add", ".")
     git(@source, "commit", "-qm", "First")
     git(@remote, "init", "-q", "--bare")
     git(@source, "push", "-q", @remote, "main")
-    git(@directory, "clone", "-q", "-b", "main", @remote, @local)
+    git(@directory, "-c", "core.autocrlf=false", "clone", "-q", "-b", "main", @remote, @local)
     git(@local, "config", "user.name", "Fixture")
     git(@local, "config", "user.email", "fixture@example.invalid")
+    git(@local, "config", "core.autocrlf", "false")
     @repository = Thuban::Repository.new(@local)
   end
 
