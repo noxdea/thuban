@@ -131,6 +131,8 @@ module Thuban
     def branches: () -> Array[String]
     def resolve: (String name, ?Array[String] seen) -> String?
     def commit: (?String reference) -> Commit?
+    def each_commit: (?String reference, limit: Integer) -> Enumerator[Commit, nil]
+                   | (?String reference, limit: Integer) { (Commit) -> void } -> nil
     def tree: (?String reference) -> Hash[String, TreeEntry]
     def blob: (String path, ?reference: String) -> String?
     def staged_blob: (String path) -> String?

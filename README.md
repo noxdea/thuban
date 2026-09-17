@@ -84,6 +84,7 @@ end
 repo.refs
 repo.branches
 repo.commit
+repo.each_commit(limit: 100)
 repo.tree
 repo.blob("README.md")
 repo.index
@@ -97,6 +98,10 @@ repo.commit("v0.1.0")
 repo.tree("main")
 repo.blob("README.md", reference: "v0.1.0")
 ```
+
+`each_commit` returns an Enumerator without a block. It visits the selected tip
+and then its parents in deterministic parent order, yields merge ancestors only
+once, and requires a positive `limit` so UI history reads remain bounded.
 
 ### Compare and Restore Changes
 

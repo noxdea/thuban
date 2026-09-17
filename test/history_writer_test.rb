@@ -38,6 +38,22 @@ class HistoryWriterTest < Minitest::Test
     assert_equal git("merge-base", descendant, redundant_merge).strip, @repository.merge_base(descendant, redundant_merge)
   end
 
+  def test_each_commit_walks_a_merge_once_in_parent_order_and_requires_a_limit
+    merge = commit_object(@main, "Merge", parents: [@main, @topic])
+
+    history = @repository.each_commit(merge, limit: 10)
+    assert_kind_of Enumerator, history
+    assert_equal [merge, @main, @topic, @base], history.map(&:oid)
+    assert_equal [merge, @main], @repository.each_commit(merge, limit: 2).map(&:oid)
+    assert_empty @repository.each_commit("missing", limit: 10).to_a
+    [0, -1, nil, 1.5].each do |limit|
+      assert_raises(ArgumentError) { @repository.each_commit(limit: limit) }
+    end
+
+    write(".git/refs/heads/main", "invalid\n")
+    assert_raises(Thuban::CorruptObject) { @repository.each_commit(limit: 1).to_a }
+  end
+
   def test_soft_mixed_and_hard_reset_match_git_state
     write("main.txt", "staged\n")
     git("add", "main.txt")

@@ -2,6 +2,17 @@
 
 module Thuban
   class Repository
+    def each_commit(reference = "HEAD", limit:)
+      raise ArgumentError, "limit must be a positive integer" unless limit.is_a?(Integer) && limit.positive?
+      return enum_for(__method__, reference, limit: limit) unless block_given?
+
+      start = commit(reference)
+      return unless start
+
+      walk_commits(start.oid, limit: limit) { |_, revision| yield revision }
+      nil
+    end
+
     def merge_base(a, b)
       left = require_commit(a).oid
       right = require_commit(b).oid
@@ -56,7 +67,7 @@ module Thuban
       commit(reference) || raise(ArgumentError, "unknown commit: #{reference}")
     end
 
-    def walk_commits(start)
+    def walk_commits(start, limit: nil)
       queue = [start]
       seen = {}
       cursor = 0
@@ -65,9 +76,11 @@ module Thuban
         cursor += 1
         next if seen[oid]
 
+        revision = require_commit(oid)
         seen[oid] = true
-        yield oid
-        queue.concat(require_commit(oid).parents)
+        queue.concat(revision.parents) unless limit && seen.length >= limit
+        yield oid, revision
+        break if limit && seen.length >= limit
       end
     end
 
