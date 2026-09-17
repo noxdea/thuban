@@ -48,7 +48,7 @@ repository operations work directly with Git data without invoking the Git execu
 Add Thuban to your Gemfile:
 
 ```ruby
-gem "thuban", "~> 0.5.0"
+gem "thuban", "~> 0.6.0"
 ```
 
 Then install it:

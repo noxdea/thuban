@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - 2026-09-17
 
 - Add transactional repository-level merge conflict resolution with stale-state checks and Git-compatible type status.
 
