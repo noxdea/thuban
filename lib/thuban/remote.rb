@@ -9,6 +9,12 @@ module Thuban
   Progress = Struct.new(:phase, :current, :total, :bytes, keyword_init: true)
 
   module Remote
+    autoload :Credentials, File.expand_path("remote/credentials", __dir__)
+    autoload :Protocol, File.expand_path("remote/protocol", __dir__)
+    autoload :Connection, File.expand_path("remote/http", __dir__)
+    autoload :SSHConnection, File.expand_path("remote/ssh", __dir__)
+    autoload :LocalConnection, File.expand_path("remote/local", __dir__)
+
     def self.open(url, credentials: nil, ssh: nil, timeout: 30)
       local_drive = url.is_a?(String) && url.match?(/\A[A-Za-z]:[\\\/]/)
       local_path = local_drive || (url.is_a?(String) && url.start_with?("/", "./", "../", "~"))

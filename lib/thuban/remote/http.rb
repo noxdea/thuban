@@ -231,3 +231,6 @@ module Thuban
     end
   end
 end
+
+require_relative "fetch"
+require_relative "push"

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-09-17
+
+- Load remote transport providers only when remote operations are used
+
 ## 0.4.0 - 2026-09-15
 
 - Add pkt-line parsing and smart HTTP protocol v2/v0 reference discovery
