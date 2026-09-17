@@ -179,6 +179,8 @@ module Thuban
       end
       owns_lock = true
       begin
+        raise RefLockError, "Git index changed since it was read" unless current_index.send(:source_unchanged?)
+
         write_worktree_tree(worktree_tree, contents, removed)
         extensions = current_index.extensions.reject { |extension| Index::ENTRY_DEPENDENT_EXTENSIONS.include?(extension.byteslice(0, 4)) }
         lock.write(Index.encode(index_entries(index_tree), extensions: extensions, version: current_index.version))

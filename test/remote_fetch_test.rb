@@ -3,6 +3,7 @@
 require_relative "test_helper"
 require_relative "support/http_fixture"
 require "stringio"
+require "timeout"
 
 class RemoteFetchTest < Minitest::Test
   Protocol = Thuban::Remote::Protocol
@@ -459,6 +460,121 @@ class RemoteFetchTest < Minitest::Test
       Thuban::Remote.stub(:open, connection) { @repository.fetch }
     end
     assert_equal concurrent, @repository.resolve(destination)
+  end
+
+  def test_repository_fetch_forwards_transfer_controls_and_closes
+    git_in(@local, "remote", "add", "origin", @server.url)
+    wanted = @repository.write_blob("wanted")
+    events = []
+    connection = Object.new
+    connection.define_singleton_method(:refs) { [Thuban::Ref.new(name: "refs/heads/main", oid: wanted)] }
+    connection.define_singleton_method(:fetch) do |repository, **options, &progress|
+      events << [repository, options]
+      progress.call(Thuban::Progress.new(phase: :pack, current: 1, total: 1, bytes: 1))
+      []
+    end
+    connection.define_singleton_method(:close) { events << :closed }
+    credentials = Object.new
+    opened = nil
+    opener = lambda do |url, **options|
+      opened = [url, options]
+      connection
+    end
+
+    Thuban::Remote.stub(:open, opener) do
+      @repository.fetch(credentials: credentials, ssh: ["ssh", "-F", "safe"], timeout: 7) { |event| events << event }
+    end
+
+    assert_equal [@server.url, {credentials: credentials, ssh: ["ssh", "-F", "safe"], timeout: 7}], opened
+    assert_equal({wants: [wanted], haves: [], depth: nil, filter: nil}, events[0][1])
+    assert_instance_of Thuban::Progress, events[1]
+    assert_equal :closed, events.last
+  end
+
+  def test_cancelled_final_progress_does_not_publish_config_or_refs
+    git_in(@local, "remote", "add", "origin", @server.url)
+    original_config = File.binread(File.join(@repository.common_dir, "config"))
+    wanted = @repository.write_blob("wanted")
+    cancelled = false
+    closes = 0
+    connection = Object.new
+    connection.define_singleton_method(:refs) { [Thuban::Ref.new(name: "refs/heads/main", oid: wanted)] }
+    connection.define_singleton_method(:fetch) do |*, **, &progress|
+      progress.call(Thuban::Progress.new(phase: :pack, current: 1, total: 1, bytes: 1))
+      []
+    end
+    connection.define_singleton_method(:close) { closes += 1 }
+
+    error = assert_raises(Thuban::Cancelled) do
+      Thuban::Remote.stub(:open, connection) do
+        @repository.fetch(filter: "blob:none", cancelled: -> { cancelled }) { cancelled = true }
+      end
+    end
+
+    assert_equal "transfer cancelled", error.message
+    assert_equal 1, closes
+    assert_nil @repository.resolve("refs/remotes/origin/main")
+    assert_equal original_config, File.binread(File.join(@repository.common_dir, "config"))
+  end
+
+  def test_cancelled_blocked_http_fetch_is_bounded_and_does_not_publish
+    started = Queue.new
+    release = Queue.new
+    blocked = HTTPFixture.new do |_request|
+      started << true
+      release.pop
+      [500, "text/plain", "released"]
+    end
+    original_config = File.binread(File.join(@repository.common_dir, "config"))
+    cancelled = false
+    operation = Thread.new do
+      @repository.fetch(blocked.url, filter: "blob:none", cancelled: -> { cancelled })
+    rescue StandardError => error
+      error
+    end
+    Timeout.timeout(2) { started.pop }
+    cancelled = true
+
+    error = Timeout.timeout(2) { operation.value }
+
+    assert_instance_of Thuban::Cancelled, error
+    assert_nil @repository.resolve("refs/remotes/origin/main")
+    assert_equal original_config, File.binread(File.join(@repository.common_dir, "config"))
+  ensure
+    release&.push(true)
+    operation&.join(2)
+    blocked&.close
+  end
+
+  def test_repository_fetch_validates_cancellation_before_opening
+    opened = false
+    opener = ->(*) { opened = true }
+
+    assert_raises(TypeError) { @repository.fetch(@server.url, cancelled: Object.new) }
+    assert_raises(Thuban::Cancelled) do
+      Thuban::Remote.stub(:open, opener) { @repository.fetch(@server.url, cancelled: -> { true }) }
+    end
+    refute opened
+  end
+
+  def test_cancellation_after_transport_close_does_not_publish_local_state
+    git_in(@local, "remote", "add", "origin", @server.url)
+    original_config = File.binread(File.join(@repository.common_dir, "config"))
+    wanted = @repository.write_blob("wanted")
+    cancelled = false
+    connection = Object.new
+    connection.define_singleton_method(:refs) { [Thuban::Ref.new(name: "refs/heads/main", oid: wanted)] }
+    connection.define_singleton_method(:fetch) { |*, **| [] }
+    connection.define_singleton_method(:close) { cancelled = true }
+
+    assert_raises(Thuban::Cancelled) do
+      Thuban::Remote.stub(:open, connection) do
+        @repository.fetch(filter: "blob:none", cancelled: -> { cancelled })
+      end
+    end
+
+    assert_nil @repository.resolve("refs/remotes/origin/main")
+    assert_equal original_config, File.binread(File.join(@repository.common_dir, "config"))
   end
 
   private

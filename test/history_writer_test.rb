@@ -195,6 +195,30 @@ class HistoryWriterTest < Minitest::Test
     refute File.exist?(index_path + ".lock")
   end
 
+  def test_repository_state_replacement_rejects_a_concurrent_index_update
+    index_path = File.join(@directory, ".git", "index")
+    lock_path = index_path + ".lock"
+    File.binwrite(File.join(@directory, "external.txt"), "external\n")
+    open = File.method(:open)
+    raced = false
+    replacement = lambda do |path, *arguments, **options, &block|
+      unless raced || path != lock_path
+        raced = true
+        git("add", "external.txt")
+      end
+      open.call(path, *arguments, **options, &block)
+    end
+
+    error = File.stub(:open, replacement) do
+      assert_raises(Thuban::RefLockError) { @repository.reset(@base, mode: :hard) }
+    end
+
+    assert_match(/index changed/, error.message)
+    assert_equal "external.txt", git("ls-files", "external.txt").strip
+    assert_equal "external\n", File.binread(File.join(@directory, "external.txt"))
+    refute File.exist?(lock_path)
+  end
+
   def test_reset_restores_the_worktree_and_index_when_ref_replacement_fails
     write("main.txt", "dirty\n")
     git("add", "main.txt")

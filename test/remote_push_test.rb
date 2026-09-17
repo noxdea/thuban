@@ -277,6 +277,35 @@ class RemotePushTest < Minitest::Test
     connection&.close
   end
 
+  def test_repository_push_forwards_transfer_controls_and_closes
+    events = []
+    connection = Object.new
+    connection.define_singleton_method(:receive_refs) { [] }
+    connection.define_singleton_method(:push) do |repository, updates, **options, &progress|
+      events << [repository, updates, options]
+      progress.call(Thuban::Progress.new(phase: :push, current: 1, total: 1, bytes: 1))
+      []
+    end
+    connection.define_singleton_method(:close) { events << :closed }
+    credentials = Object.new
+    opened = nil
+    opener = lambda do |url, **options|
+      opened = [url, options]
+      connection
+    end
+
+    Thuban::Remote.stub(:open, opener) do
+      @repository.push(@remote, refspecs: "refs/heads/main:refs/heads/main", credentials: credentials,
+        ssh: ["ssh"], timeout: 9) { |event| events << event }
+    end
+
+    assert_equal [File.expand_path(@remote, @source), {credentials: credentials, ssh: ["ssh"], timeout: 9}], opened
+    assert_equal [["refs/heads/main", "0" * 40, @first]], events[0][1]
+    assert_equal({atomic: false}, events[0][2])
+    assert_instance_of Thuban::Progress, events[1]
+    assert_equal :closed, events.last
+  end
+
   private
 
   def commit(contents, message)

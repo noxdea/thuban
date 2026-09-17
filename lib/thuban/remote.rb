@@ -3,6 +3,7 @@
 module Thuban
   class Error < StandardError; end
   class TransportError < Error; end
+  class Cancelled < TransportError; end
   class AuthenticationError < TransportError; end
 
   Ref = Struct.new(:name, :oid, :symref_target, :peeled, keyword_init: true)

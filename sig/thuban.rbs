@@ -27,6 +27,9 @@ module Thuban
   class TransportError < Error
   end
 
+  class Cancelled < TransportError
+  end
+
   class AuthenticationError < TransportError
   end
 
@@ -163,8 +166,9 @@ module Thuban
     def stash_pop: (?Integer index) -> String
     def stash_list: () -> Array[Commit]
     def remotes: () -> Hash[String, String]
-    def fetch: (?String remote, ?refspecs: String | Enumerable[String]?, ?depth: Integer?, ?filter: String?) ?{ (Progress) -> void } -> Array[Ref]
-    def push: (?String remote, refspecs: String | Enumerable[String], ?force: bool, ?lease: String | Hash[String, String]?, ?atomic: bool) ?{ (Progress) -> void } -> Array[Ref]
+    def fetch: (?String remote, ?refspecs: String | Enumerable[String]?, ?depth: Integer?, ?filter: String?, ?credentials: untyped, ?ssh: Remote::ssh_command?, ?timeout: Numeric, ?cancelled: ^() -> bool?) ?{ (Progress) -> void } -> Array[Ref]
+    def push: (?String remote, refspecs: String | Enumerable[String], ?force: bool, ?lease: String | Hash[String, String]?, ?atomic: bool, ?credentials: untyped, ?ssh: Remote::ssh_command?, ?timeout: Numeric, ?cancelled: ^() -> bool?) ?{ (Progress) -> void } -> Array[Ref]
+    def pull: (?String remote, ?branch: String?, ?ff_only: bool, ?credentials: untyped, ?ssh: Remote::ssh_command?, ?timeout: Numeric, ?cancelled: ^() -> bool?) ?{ (Progress) -> void } -> String
   end
 
   class ObjectDatabase

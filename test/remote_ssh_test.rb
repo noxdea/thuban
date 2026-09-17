@@ -4,6 +4,7 @@ require_relative "test_helper"
 require "json"
 require "rbconfig"
 require "shellwords"
+require "timeout"
 
 class RemoteSSHTest < Minitest::Test
   def setup
@@ -216,6 +217,29 @@ class RemoteSSHTest < Minitest::Test
     assert_instance_of Thuban::TransportError, error
   ensure
     connection&.close
+  end
+
+  def test_high_level_cancellation_stops_a_blocked_ssh_fetch
+    ready = File.join(@directory, "high-level-ready")
+    sleeper = File.join(@directory, "high-level-cancel.rb")
+    File.binwrite(sleeper, "File.write(#{ready.dump}, \"ready\")\nsleep 30\n")
+    cancelled = false
+    operation = Thread.new do
+      @repository.fetch("host:repo.git", ssh: [RbConfig.ruby, sleeper], cancelled: -> { cancelled })
+    rescue StandardError => error
+      error
+    end
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
+    sleep 0.01 until File.exist?(ready) || Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+    assert File.exist?(ready), "SSH process did not start"
+    cancelled = true
+
+    error = Timeout.timeout(2) { operation.value }
+
+    assert_instance_of Thuban::Cancelled, error
+    assert_empty @repository.refs
+  ensure
+    operation&.join(2)
   end
 
   def test_close_is_idempotent_and_http_authentication_stays_separate

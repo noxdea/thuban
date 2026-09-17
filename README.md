@@ -298,6 +298,11 @@ repo.fetch("origin", depth: 1) { |event| warn "#{event.phase}: #{event.bytes}" }
 repo.fetch("origin", filter: "blob:none")
 ```
 
+High-level fetch, push, and pull accept `credentials:`, `ssh:`, `timeout:`, and
+a zero-argument `cancelled:` callback. Cancellation closes a blocked transport
+and raises `Thuban::Cancelled`. A push may already have been applied remotely
+when cancellation is observed, so callers must refresh remote refs before retrying.
+
 `depth:` accepts positive 32-bit integers and `filter:` currently accepts only
 `"blob:none"`. Thuban negotiates only features advertised by the server. Shallow
 boundaries are atomically maintained in Git's `shallow` file. For configured
@@ -319,6 +324,15 @@ repo.push("origin", refspecs: [
   "refs/heads/main:refs/heads/main",
   "refs/tags/v1:refs/tags/v1"
 ], atomic: true) { |progress| warn "#{progress.phase}: #{progress.current}/#{progress.total}" }
+```
+
+Pull updates the current branch, index, and worktree only when the named remote
+branch is a fast-forward. Tracked changes, detached HEADs, bare repositories,
+and untracked collisions are rejected; fetched objects and tracking refs remain
+available when the fast-forward cannot be applied:
+
+```ruby
+repo.pull("origin", branch: "main")
 ```
 
 Remote names, direct paths, `file://` URLs, HTTP(S), and SSH URLs are accepted.

@@ -5,6 +5,8 @@
 - Expose parsed commit signatures and separate author and committer identities in `commit!`
 - Add current author and committer identity lookup with `Repository#signature`
 - Add bounded commit history traversal with `Repository#each_commit`
+- Add cancellable high-level fetch and push controls and fast-forward-only pull
+- Honor `core.filemode` when reporting worktree changes
 
 ## 0.4.1 - 2026-09-17
 

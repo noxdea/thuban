@@ -6,9 +6,10 @@ module Thuban
       remote_settings.transform_values { |settings| settings[:url] }.compact
     end
 
-    def fetch(remote = "origin", refspecs: nil, depth: nil, filter: nil)
+    def fetch(remote = "origin", refspecs: nil, depth: nil, filter: nil, credentials: nil, ssh: nil, timeout: 30, cancelled: nil)
       depth = Remote::Protocol.validate_depth(depth)
       filter = Remote::Protocol.validate_filter(filter)
+      validate_cancelled(cancelled)
       settings = remote_settings[remote]
       direct = direct_remote?(remote)
       url = settings&.fetch(:url, nil) || (remote if direct)
@@ -21,27 +22,38 @@ module Thuban
         specs = ["+refs/heads/*:refs/remotes/#{remote}/*"] if specs.empty?
       end
       specs = normalize_fetch_refspecs(specs)
-      connection = Remote.open(url)
-      advertised = connection.refs
-      updates = select_fetch_refs(advertised, specs)
-      wants = updates.map { |ref, _| ref.oid }.compact.uniq
-      previous = updates.filter_map { |_, destination| [destination, resolve(destination)] if destination }.to_h
-      unless wants.empty?
-        haves = refs.values.compact.uniq.select { |oid| odb.exist?(oid) }
-        connection.fetch(self, wants: wants, haves: haves, depth: depth, filter: filter) do |progress|
-          yield progress if block_given?
+      check_cancellation!(cancelled)
+      connection = Remote.open(url, credentials: credentials, ssh: ssh, timeout: timeout)
+      advertised, updates, previous, publish = with_transfer(connection, cancelled) do |check_cancelled|
+        advertised = connection.refs
+        check_cancelled.call
+        updates = select_fetch_refs(advertised, specs)
+        wants = updates.map { |ref, _| ref.oid }.compact.uniq
+        previous = updates.filter_map { |_, destination| [destination, resolve(destination)] if destination }.to_h
+        unless wants.empty?
+          haves = refs.values.compact.uniq.select { |oid| odb.exist?(oid) }
+          connection.fetch(self, wants: wants, haves: haves, depth: depth, filter: filter) do |progress|
+            yield progress if block_given?
+            check_cancelled.call
+          end
+          check_cancelled.call
         end
+        check_cancelled.call
+        [advertised, updates, previous, !wants.empty?]
+      end
+      check_cancellation!(cancelled)
+      if publish
         record_promisor(remote, filter) if filter && settings
         updates.each do |ref, destination|
           update_ref(destination, ref.oid, old_oid: previous.fetch(destination), message: "fetch #{remote}: #{ref.name}") if destination && ref.oid
         end
       end
       advertised
-    ensure
-      connection&.close
     end
 
-    def push(remote = "origin", refspecs:, force: false, lease: nil, atomic: false)
+    def push(remote = "origin", refspecs:, force: false, lease: nil, atomic: false,
+      credentials: nil, ssh: nil, timeout: 30, cancelled: nil)
+      validate_cancelled(cancelled)
       settings = remote_settings[remote]
       direct = direct_remote?(remote)
       url = settings&.fetch(:pushurl, nil) || settings&.fetch(:url, nil) || (remote if direct)
@@ -50,15 +62,100 @@ module Thuban
       raise ArgumentError, "force must be true or false" unless [true, false].include?(force)
       raise ArgumentError, "atomic must be true or false" unless [true, false].include?(atomic)
 
-      connection = Remote.open(url)
-      advertised = connection.send(:receive_refs)
-      updates = push_updates(refspecs, force: force, lease: lease, advertised: advertised)
-      connection.push(self, updates, atomic: atomic) { |progress| yield progress if block_given? }
-    ensure
-      connection&.close
+      check_cancellation!(cancelled)
+      connection = Remote.open(url, credentials: credentials, ssh: ssh, timeout: timeout)
+      with_transfer(connection, cancelled) do |check_cancelled|
+        advertised = connection.send(:receive_refs)
+        check_cancelled.call
+        updates = push_updates(refspecs, force: force, lease: lease, advertised: advertised)
+        result = connection.push(self, updates, atomic: atomic) do |progress|
+          yield progress if block_given?
+          check_cancelled.call
+        end
+        check_cancelled.call
+        result
+      end
+    end
+
+    def pull(remote = "origin", branch: nil, ff_only: true, credentials: nil, ssh: nil, timeout: 30, cancelled: nil, &progress)
+      raise ArgumentError, "only fast-forward pulls are supported" unless ff_only == true
+      validate_cancelled(cancelled)
+      check_cancellation!(cancelled)
+      raise ArgumentError, "bare repository has no worktree" unless root
+      local_branch = self.branch
+      raise ArgumentError, "cannot pull with a detached HEAD" unless local_branch
+      remote_branch = branch || local_branch
+      raise ArgumentError, "invalid remote branch" unless valid_refspec_name?("refs/heads/#{remote_branch}")
+      ensure_clean_tracked_state!
+      current = head
+
+      settings = remote_settings[remote]
+      destination = settings && "refs/remotes/#{remote}/#{remote_branch}"
+      spec = "refs/heads/#{remote_branch}:#{destination}"
+      spec = "refs/heads/#{remote_branch}" unless destination
+      advertised = fetch(remote, refspecs: spec, credentials: credentials, ssh: ssh, timeout: timeout,
+        cancelled: cancelled, &progress)
+      check_cancellation!(cancelled)
+      target = advertised.find { |ref| ref.name == "refs/heads/#{remote_branch}" }&.oid
+      raise TransportError, "remote branch not found: #{remote_branch}" unless target
+      return target if current == target
+      raise TransportError, "pull is not a fast-forward" if current && merge_base(current, target) != current
+
+      check_cancellation!(cancelled)
+      RefStore.new(self).update("HEAD", target, old_oid: current, message: "pull #{remote} #{remote_branch}: fast-forward") do
+        raise RefLockError, "HEAD changed during pull" unless self.branch == local_branch
+        ensure_clean_tracked_state!
+        check_cancellation!(cancelled)
+        replace_repository_state(tree(target), tree(target))
+      end
     end
 
     private
+
+    def validate_cancelled(cancelled)
+      return if cancelled.nil?
+
+      callable = cancelled.respond_to?(:call) && cancelled.method(:call)
+      valid = callable && callable.parameters.none? { |kind, _| %i[req keyreq].include?(kind) }
+      raise TypeError, "cancelled must be a zero-argument callable" unless valid
+    end
+
+    def check_cancellation!(cancelled)
+      raise Cancelled, "transfer cancelled" if cancelled&.call
+    end
+
+    def with_transfer(connection, cancelled)
+      state = {done: false, cancelled: false}
+      lock = Mutex.new
+      check = lambda do
+        requested = lock.synchronize { state[:cancelled] } || cancelled&.call
+        lock.synchronize { state[:cancelled] = true } if requested
+        raise Cancelled, "transfer cancelled" if requested
+      end
+      check.call
+      watcher = if cancelled
+        Thread.new do
+          loop do
+            sleep 0.01
+            break if lock.synchronize { state[:done] }
+            next unless cancelled.call
+
+            lock.synchronize { state[:cancelled] = true }
+            connection.close
+            break
+          end
+        end
+      end
+      yield check
+    rescue TransportError
+      raise Cancelled, "transfer cancelled" if lock&.synchronize { state[:cancelled] }
+
+      raise
+    ensure
+      lock&.synchronize { state[:done] = true }
+      watcher&.join
+      connection&.close
+    end
 
     def direct_remote?(remote)
       value = remote.to_s
