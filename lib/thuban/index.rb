@@ -14,7 +14,12 @@ module Thuban
       @entries = []
       @extensions = []
       @version = 2
-      parse(File.binread(path)) if File.file?(path)
+      @source_checksum = nil
+      if File.file?(path)
+        bytes = File.binread(path)
+        @source_checksum = Digest::SHA1.digest(bytes)
+        parse(bytes)
+      end
     end
 
     def each(&block) = entries.each(&block)

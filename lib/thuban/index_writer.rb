@@ -10,12 +10,16 @@ module Thuban
       FileUtils.mkdir_p(File.dirname(path))
       file = File.open(lock_path, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
       owns_lock = true
-      file.write(self.class.encode(entries, extensions: extensions, version: version))
+      raise RefLockError, "Git index changed since it was read" unless source_unchanged?
+
+      contents = self.class.encode(entries, extensions: extensions, version: version)
+      file.write(contents)
       file.flush
       file.fsync
       file.close
       File.rename(lock_path, path)
       owns_lock = false
+      @source_checksum = Digest::SHA1.digest(contents)
       self
     rescue Errno::EEXIST
       raise IOError, "Git index is locked: #{lock_path}"
@@ -61,6 +65,14 @@ module Thuban
     end
 
     private
+
+    def source_unchanged?
+      @source_checksum == Digest::SHA1.digest(File.binread(path))
+    rescue Errno::ENOENT
+      @source_checksum.nil? && !File.symlink?(path)
+    rescue SystemCallError
+      false
+    end
 
     def validate_entry(path, oid, mode)
       validate_path(path)

@@ -47,7 +47,6 @@ class IndexWriterTest < Minitest::Test
     index.write
     assert_equal original_bytes, File.binread(index.path)
     assert_equal before, @repository.index.extensions
-    assert_empty git("status", "--porcelain=v1")
 
     blob = @repository.write_blob("old\n")
     index.stage("tracked.txt", blob, 0o100644, stat: File.stat(File.join(@directory, "tracked.txt")))
@@ -133,6 +132,39 @@ class IndexWriterTest < Minitest::Test
 
     File.stub(:rename, replacement) { index.write }
     assert_equal "foreign", File.binread(lock)
+  end
+
+  def test_rejects_an_external_index_update_without_overwriting_it
+    index = @repository.index
+    File.binwrite(File.join(@directory, "external.txt"), "external\n")
+    git("add", "external.txt")
+    external = File.binread(index.path)
+
+    assert_raises(Thuban::RefLockError) { index.write }
+    assert_equal external, File.binread(index.path)
+    refute File.exist?(index.path + ".lock")
+    assert_equal "external.txt", git("ls-files", "external.txt").strip
+  end
+
+  def test_rejects_an_index_created_after_loading_an_absent_index
+    path = File.join(@directory, ".git", "index")
+    File.unlink(path)
+    index = @repository.index
+    git("read-tree", "HEAD")
+    external = File.binread(path)
+
+    assert_raises(Thuban::RefLockError) { index.write }
+    assert_equal external, File.binread(path)
+    refute File.exist?(path + ".lock")
+    assert_equal "tracked.txt", git("ls-files").strip
+  end
+
+  def test_refreshes_the_source_checksum_after_a_successful_write
+    index = @repository.index
+
+    assert_same index, index.write
+    assert_same index, index.write
+    assert_empty git("status", "--porcelain=v1")
   end
 
   def test_preserves_resolve_undo_records
