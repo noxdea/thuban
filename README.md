@@ -168,6 +168,24 @@ removes the stage-zero entry; stage the corresponding HEAD entry to restore a
 tracked path. `conflicts` exposes stage 1/2/3 entries and `resolve` replaces
 them with a stage-zero entry.
 
+For a transactional index and worktree update, capture a repository conflict
+and resolve that exact snapshot:
+
+```ruby
+conflict = repo.conflicts.first
+repo.resolve_conflict(conflict, choice: :ours) # :theirs or :both
+repo.resolve_conflict(conflict, choice: :manual, content: edited, mode: 0o100644)
+```
+
+`:ours` and `:theirs` also resolve a deleted side. `:both` performs a text
+three-way merge and places ours before theirs in remaining regions. Binary and
+symlink conflicts can be selected unchanged or replaced with `:manual`; they
+cannot use `:both`. HEAD and the index are locked, and the captured worktree is
+revalidated at each write boundary. A change observed there raises
+`RefLockError` before the index or worktree is changed; uncoordinated writes
+racing the final atomic replacement require external coordination. Other
+unresolved paths remain in the index.
+
 Create and update refs with optimistic old-OID checks:
 
 ```ruby

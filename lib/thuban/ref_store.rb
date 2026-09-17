@@ -89,6 +89,18 @@ module Thuban
 
     attr_reader :repository
 
+    def with_lock(name, old_oid: :any)
+      validate_ref(name)
+      target = dereference(name)
+      paths = [ref_path(target)]
+      paths << ref_path(name) if target != name
+      with_locks(paths) do
+        raise RefLockError, "symbolic reference changed: #{name}" unless dereference(name) == target
+        verify_old_oid(name, repository.resolve(target), old_oid)
+        yield
+      end
+    end
+
     def validate_ref(name, head: true)
       return if head && name == "HEAD"
       invalid = !name.is_a?(String) || !name.start_with?("refs/") || name.end_with?("/", ".") ||

@@ -76,6 +76,8 @@ module Thuban
 
     private
 
+    def source_checksum = @source_checksum
+
     def parse(bytes)
       raise CorruptObject, "invalid Git index" unless bytes.bytesize >= 32 && bytes.start_with?("DIRC")
       raise CorruptObject, "Git index checksum mismatch" unless Digest::SHA1.digest(bytes[0...-20]) == bytes[-20, 20]

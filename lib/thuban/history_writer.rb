@@ -156,21 +156,14 @@ module Thuban
       raise ArgumentError, "worktree/index must be clean" if status.any? { |entry| entry.index != "?" }
     end
 
-    def replace_repository_state(worktree_tree, index_tree, remove_paths: [])
+    def replace_repository_state(worktree_tree, index_tree, remove_paths: [], affected_paths: nil, current_index: nil,
+      validate: nil)
       raise ArgumentError, "bare repository has no worktree" unless root
-      current_index = index
-      current = current_index.entries.to_h { |entry| [entry.path, entry] }
+      current_index ||= index
+      current = current_index.entries.group_by(&:path).transform_values { |entries| entries.find { |entry| entry.stage.zero? } || entries.first }
       tracked = head ? tree(head).merge(current) : current
-      raise ArgumentError, "submodule updates require separate worktree handling" if
-        (tracked.values + worktree_tree.values + index_tree.values).any? { |entry| entry.mode == 0o160000 }
-
-      removed = (tracked.keys - worktree_tree.keys) | remove_paths
-      check_worktree_collisions(worktree_tree, tracked, removed)
-      contents = worktree_tree.to_h { |path, entry| [path, odb.read(entry.oid).last] }
-      affected = (tracked.keys | worktree_tree.keys | remove_paths)
-      backups = affected.to_h { |path| [path, worktree_backup(path)] }
+      affected = affected_paths || (tracked.keys | worktree_tree.keys | remove_paths)
       index_path = File.join(git_dir, "index")
-      index_backup = File.file?(index_path) ? [File.binread(index_path), File.stat(index_path).mode & 0o777] : nil
       lock_path = index_path + ".lock"
       begin
         lock = File.open(lock_path, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
@@ -178,19 +171,38 @@ module Thuban
         raise IOError, "Git index is locked: #{lock_path}"
       end
       owns_lock = true
+      changed = false
       begin
         raise RefLockError, "Git index changed since it was read" unless current_index.send(:source_unchanged?)
+        backups = affected.to_h { |path| [path, worktree_backup(path)] }
+        index_backup = File.file?(index_path) ? [File.binread(index_path), File.stat(index_path).mode & 0o777] : nil
+        validate&.call(current_index, backups)
+        yield current_index if block_given?
 
-        write_worktree_tree(worktree_tree, contents, removed)
+        raise ArgumentError, "repository state update escaped its affected paths" unless
+          (worktree_tree.keys | remove_paths).all? { |path| affected.include?(path) }
+        candidates = current_index.entries + worktree_tree.values + index_target_entries(index_tree)
+        candidates.select! { |entry| affected.include?(entry.path) } if affected_paths
+        raise ArgumentError, "submodule updates require separate worktree handling" if candidates.any? { |entry| entry.mode == 0o160000 }
+
+        removed = affected_paths ? ((affected - worktree_tree.keys) | remove_paths) : ((tracked.keys - worktree_tree.keys) | remove_paths)
+        check_worktree_collisions(worktree_tree, tracked, removed)
+        contents = worktree_tree.to_h { |path, entry| [path, odb.read(entry.oid).last] }
+        validate&.call(current_index, backups)
+        write_worktree_tree(worktree_tree, contents, removed) do
+          validate&.call(current_index, backups)
+          changed = true
+        end
         extensions = current_index.extensions.reject { |extension| Index::ENTRY_DEPENDENT_EXTENSIONS.include?(extension.byteslice(0, 4)) }
-        lock.write(Index.encode(index_entries(index_tree), extensions: extensions, version: current_index.version))
+        entries = index_tree.is_a?(Array) ? refresh_index_entries(index_tree, worktree_tree, affected) : index_entries(index_tree)
+        lock.write(Index.encode(entries, extensions: extensions, version: current_index.version))
         lock.flush
         lock.fsync
         lock.close
         File.rename(lock_path, index_path)
         owns_lock = false
       rescue StandardError
-        restore_worktree(backups, affected)
+        restore_worktree(backups, affected) if changed
         raise
       ensure
         lock&.close unless lock&.closed?
@@ -199,13 +211,33 @@ module Thuban
       -> { restore_repository_state(backups, affected, index_path, index_backup) }
     end
 
+    def index_target_entries(target)
+      target.is_a?(Array) ? target : target.values
+    end
+
+    def refresh_index_entries(entries, worktree_tree, affected)
+      entries.map do |entry|
+        target = worktree_tree[entry.path]
+        next entry unless entry.stage.zero? && target && affected.include?(entry.path)
+
+        stat = matching_worktree_stat(entry.path, target)
+        Index::Entry.new(path: entry.path, oid: entry.oid, mode: entry.mode, size: stat&.size.to_i,
+          mtime: stat&.mtime.to_i, mtime_nsec: stat&.mtime&.nsec.to_i,
+          ctime: stat&.ctime.to_i, ctime_nsec: stat&.ctime&.nsec.to_i,
+          dev: stat&.dev.to_i, ino: stat&.ino.to_i, uid: stat&.uid.to_i, gid: stat&.gid.to_i,
+          stage: 0, flags: 0, extended_flags: 0)
+      end
+    end
+
     def write_worktree_tree(target, contents, removed)
       removed.sort_by { |path| -path.count("/") }.each do |path|
+        yield if block_given?
         absolute = worktree_path(path)
         File.unlink(absolute) if File.file?(absolute) || File.symlink?(absolute)
       end
       prune_empty_directories(removed)
       target.sort.each do |path, entry|
+        yield if block_given?
         absolute = worktree_path(path)
         Dir.rmdir(absolute) if File.directory?(absolute) && !File.symlink?(absolute)
         FileUtils.mkdir_p(File.dirname(absolute))

@@ -98,6 +98,24 @@ module Thuban
     def self.new: (path: String, oid: String, mode: Integer) -> instance
   end
 
+  class ConflictWorktree < Struct[untyped]
+    attr_accessor kind: :missing | :file | :symlink | :directory | :other
+    attr_accessor content: String?
+    attr_accessor mode: Integer?
+    def self.new: (kind: (:missing | :file | :symlink | :directory | :other), content: String?, mode: Integer?) -> instance
+  end
+
+  class Conflict < Struct[untyped]
+    attr_accessor path: String
+    attr_accessor base: Index::Entry?
+    attr_accessor ours: Index::Entry?
+    attr_accessor theirs: Index::Entry?
+    attr_accessor head: String?
+    attr_accessor worktree: ConflictWorktree
+    attr_accessor index_checksum: String?
+    def self.new: (path: String, base: Index::Entry?, ours: Index::Entry?, theirs: Index::Entry?, head: String?, worktree: ConflictWorktree, index_checksum: String?) -> instance
+  end
+
   class Signature < Struct[untyped]
     attr_accessor name: String
     attr_accessor email: String
@@ -162,6 +180,8 @@ module Thuban
     def reset: (String oid, ?mode: :soft | :mixed | :hard) -> String
     def cherry_pick: (String oid) -> String
     def revert: (String oid) -> String
+    def conflicts: () -> Array[Conflict]
+    def resolve_conflict: (Conflict conflict, choice: (:ours | :theirs | :both | :manual), ?content: String?, ?mode: Integer?) -> String
     def stash_push: (?message: String?, ?include_untracked: bool) -> String?
     def stash_pop: (?Integer index) -> String
     def stash_list: () -> Array[Commit]

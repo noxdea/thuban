@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add transactional repository-level merge conflict resolution with stale-state checks and Git-compatible type status.
+
 ## 0.5.0 - 2026-09-17
 
 - Expose parsed commit signatures and separate author and committer identities in `commit!`

@@ -29,6 +29,7 @@ module Thuban
         original = head[path]
         x = if !original then "A"
         elsif !staged then "D"
+        elsif (original.mode & 0o170000) != (staged.mode & 0o170000) then "T"
         elsif original.mode != staged.mode || original.oid != staged.oid then "M"
         else " " end
         y = staged ? worktree_status(staged, index.path, filemode) : " "
