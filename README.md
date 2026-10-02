@@ -1,47 +1,43 @@
 <h1 align="center">Thuban</h1>
 
 <p align="center">
-  <strong>A pure Ruby Git implementation for local repositories and remote transfers</strong>
+  <strong>A pure Ruby Git implementation for local repositories and remote transfers.</strong>
 </p>
 
 <p align="center">
-  <a href="https://rubygems.org/gems/thuban"><img src="https://img.shields.io/gem/v/thuban.svg?colorB=319e8c" alt="Gem Version"></a>
-  <a href="https://rubygems.org/gems/thuban"><img src="https://img.shields.io/gem/dt/thuban.svg" alt="Downloads"></a>
-  <a href="https://github.com/noxdea/thuban/actions/workflows/main.yml"><img src="https://github.com/noxdea/thuban/actions/workflows/main.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/ruby-%3E%3D%203.1-ruby.svg" alt="Ruby 3.1+">
-  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://rubygems.org/gems/thuban"><img src="https://img.shields.io/gem/v/thuban.svg" alt="Gem version"></a>
+  <a href="https://rubygems.org/gems/thuban"><img src="https://img.shields.io/gem/dt/thuban.svg" alt="Gem downloads"></a>
+  <a href="https://github.com/noxdea/thuban/actions/workflows/main.yml"><img src="https://github.com/noxdea/thuban/actions/workflows/main.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="thuban.gemspec"><img src="https://img.shields.io/badge/Ruby-%3E%3D%203.1-cc342d.svg" alt="Ruby 3.1 or newer"></a>
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
 </p>
 
 <p align="center">
+  <a href="https://noxdea.github.io/thuban/">Website</a> ·
+  <a href="https://noxdea.github.io/thuban/guide/">User Guide</a> ·
   <a href="#features">Features</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="#usage">Usage</a> ·
-  <a href="#scope">Scope</a>
+  <a href="#quick-start">Quick start</a>
 </p>
 
 ---
 
-Thuban is a pure Ruby Git implementation for reading and writing local
-repositories and transferring data with local, smart HTTP, or SSH remotes. Local
-repository operations work directly with Git data without invoking the Git executable.
+Thuban lets Ruby applications inspect Git history, stage and commit changes,
+and transfer objects and refs with remotes. Local repository operations read
+and write Git data directly, without invoking the Git executable. It uses
+[Porrima](https://github.com/noxdea/porrima) for line matching in blame and
+for composing diffs in your application.
 
 ## Features
 
-- Reads loose objects and packfiles, including deltified objects
-- Resolves refs, branches, commits, trees, and blobs
-- Reads the index and reports staged, worktree, and untracked changes
-- Writes loose objects, index entries, refs, reflogs, trees, and commits
-- Finds merge bases and performs reset, cherry-pick, revert, and stash operations
-- Writes interoperable delta-free Git packfiles to any writable IO
-- Discovers smart HTTP protocol v2 and v0 remote references
-- Fetches smart HTTP packs into the local object database
-- Authenticates smart HTTP with Basic, Bearer, callbacks, or Git credential helpers
-- Pushes refs and packfiles with force-with-lease and atomic update support
-- Discovers, fetches, and pushes SSH remotes through the system `ssh` executable
-- Tracks line history across commits and renames with blame
-- Writes files atomically and checks out branches with collision guards
-- Supports linked worktrees and packed refs
+- Read loose and packed objects, including deltas, refs, commits, trees, and blobs.
+- Inspect the index, staged and worktree changes, ignored paths, and line history across renames.
+- Write objects, stage files, create commits, and update refs and reflogs with locks and old-OID checks.
+- Check out branches, reset, cherry-pick, revert, resolve index conflicts, and stash changes.
+- Fetch and push local, smart HTTP, and SSH remotes; pull fast-forward updates.
+- Use Basic, Bearer, callback, or Git credential helper authentication for HTTP.
+- Fetch shallow or blobless history and report transfer progress with cancellation support.
+- Write interoperable delta-free packfiles and work with linked worktrees and packed refs.
 
 ## Installation
 
@@ -51,17 +47,21 @@ Add Thuban to your Gemfile:
 gem "thuban", "~> 0.6.0"
 ```
 
-Then install it:
+Then run `bundle install`. To install it directly:
 
 ```sh
-bundle install
+gem install thuban
 ```
 
-Thuban requires Ruby 3.1 or later and targets SHA-1 Git repositories.
+Thuban requires Ruby 3.1 or newer and supports SHA-1 Git repositories.
+Local read and write operations need no Git executable. Local remote transfers
+need `git-upload-pack` and `git-receive-pack`; SSH remotes need the system
+`ssh` client, and Git credential helpers need `git`. Smart HTTP transfers use
+Ruby's standard library.
 
-## Quick Start
+## Quick start
 
-Open the repository containing the current directory:
+Run this from an existing Git worktree:
 
 ```ruby
 require "thuban"
@@ -74,348 +74,86 @@ puts repo.head
 repo.status.each do |entry|
   puts "#{entry.code} #{entry.path}"
 end
+
+repo.each_commit(limit: 10).each do |commit|
+  puts "#{commit.oid[0, 7]} #{commit.message.lines.first.to_s.chomp}"
+end
 ```
 
-Status checks honor the repository's `core.filemode` setting; `repo.filemode?`
-exposes the effective value.
+Repository discovery walks up from the supplied directory. Status codes use
+two columns for index and worktree changes, such as ` M` for an unstaged
+modification or `??` for an untracked file. History reads require a positive
+`limit`.
 
 ## Usage
 
-### Read Repository Data
+Read a committed file, the index version, or its current worktree content:
 
 ```ruby
-repo.refs
-repo.branches
-repo.commit
-repo.each_commit(limit: 100)
-repo.tree
 repo.blob("README.md")
-repo.index
+repo.blob("README.md", reference: "main")
+repo.staged_blob("README.md")
+repo.worktree_content("README.md")
 repo.blame("README.md")
 ```
 
-Pass a branch, tag, or object ID when reading another revision:
-
-```ruby
-repo.commit("v0.1.0")
-repo.tree("main")
-repo.blob("README.md", reference: "v0.1.0")
-```
-
-`each_commit` returns an Enumerator without a block. It visits the selected tip
-and then its parents in deterministic parent order, yields merge ancestors only
-once, and requires a positive `limit` so UI history reads remain bounded.
-
-### Compare and Restore Changes
-
-Thuban exposes staged and worktree content for explicit comparison with
-[Porrima](https://github.com/noxdea/porrima):
-
-```ruby
-before = repo.staged_blob("README.md").to_s
-after = repo.worktree_content("README.md").to_s
-diff = Porrima.diff(before, after)
-
-if (hunk = diff.hunks.first)
-  repo.write("README.md", Porrima.revert(after, hunk))
-end
-```
-
-### Write and Check Out
-
-```ruby
-repo.write("README.md", "updated contents\n")
-repo.checkout("feature")
-```
-
-`Repository#write` rejects symlinks, preserves the file mode, and replaces the
-file atomically. `Repository#checkout` requires a clean tracked worktree and
-aborts on untracked or ignored collisions.
-
-### Stage and Commit
-
-Write a blob, add it to the index, then create a commit from the index:
+Stage an existing regular file, then commit the index:
 
 ```ruby
 path = "README.md"
-oid = repo.write_blob(File.binread(path))
+absolute = repo.worktree_path(path)
+stat = File.stat(absolute)
+mode = (stat.mode & 0o100).positive? ? 0o100755 : 0o100644
+
 index = repo.index
-index.stage(path, oid, 0o100644, stat: File.stat(path))
+index.stage(path, repo.write_blob(File.binread(absolute)), mode, stat: stat)
 index.write
 
-author = repo.signature(role: :author)
-commit = repo.commit!(message: "Update README", author: author)
+oid = repo.commit!(message: "Update README", author: repo.signature)
+puts oid
 ```
 
-`Repository#signature` reads the matching `GIT_AUTHOR_NAME` /
-`GIT_AUTHOR_EMAIL` or `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` first,
-then `user.name` / `user.email` from Git configuration. It returns the current
-time and UTC offset and raises `ArgumentError` when either identity value is
-missing or invalid.
+`repo.signature` reads the author environment variables, then `user.name` and
+`user.email` from Git configuration. Set an identity before committing. The
+[writing guide](https://noxdea.github.io/thuban/guide/#writing) also covers
+amending commits, restoring index entries, and resolving conflicts.
 
-To amend without changing the original author or author timestamp, read the
-author signature from the commit and provide a separate current committer:
+For a repository with an `origin` remote:
 
 ```ruby
-original = repo.commit
-committer = repo.signature(role: :committer)
-repo.commit!(message: "Update README", author: original.signature(role: :author), committer: committer, amend: true)
-```
-
-`Index#write` uses Git's `index.lock`, retains optional extensions as raw bytes,
-and invalidates entry-dependent cache extensions after mutation. `unstage`
-removes the stage-zero entry; stage the corresponding HEAD entry to restore a
-tracked path. `conflicts` exposes stage 1/2/3 entries and `resolve` replaces
-them with a stage-zero entry.
-
-For a transactional index and worktree update, capture a repository conflict
-and resolve that exact snapshot:
-
-```ruby
-conflict = repo.conflicts.first
-repo.resolve_conflict(conflict, choice: :ours) # :theirs or :both
-repo.resolve_conflict(conflict, choice: :manual, content: edited, mode: 0o100644)
-```
-
-`:ours` and `:theirs` also resolve a deleted side. `:both` performs a text
-three-way merge and places ours before theirs in remaining regions. Binary and
-symlink conflicts can be selected unchanged or replaced with `:manual`; they
-cannot use `:both`. HEAD and the index are locked, and the captured worktree is
-revalidated at each write boundary. A change observed there raises
-`RefLockError` before the index or worktree is changed; uncoordinated writes
-racing the final atomic replacement require external coordination. Other
-unresolved paths remain in the index.
-
-Create and update refs with optimistic old-OID checks:
-
-```ruby
-repo.create_branch("topic", repo.head)
-repo.update_ref("refs/heads/topic", commit, old_oid: repo.head, message: "advance")
-repo.reflog("topic") # raw Git reflog records
-```
-
-Ref mutations use `.lock` files and raise `Thuban::RefLockError` when a lock is
-held or the expected old OID no longer matches. Loose updates override packed
-refs, and deletion removes both forms.
-
-### History and Stash
-
-Use the same branch names, tags, or full object IDs accepted by the read API:
-
-```ruby
-base = repo.merge_base("main", "topic")
-repo.reset(base, mode: :mixed) # :soft and :hard are also supported
-picked = repo.cherry_pick("topic")
-repo.revert(picked)
-
-stash = repo.stash_push(message: "before refactor", include_untracked: true)
-repo.stash_list # newest first, as Commit objects
-repo.stash_pop if stash
-```
-
-Cherry-pick and revert require a clean tracked worktree and accept commits with
-at most one parent. They merge non-overlapping text changes and detect remaining
-three-way conflicts before changing files. Stash uses Git's standard commit and
-reflog layout, retains staged state, and can include untracked files.
-Worktree-changing operations reject submodules and untracked collisions rather
-than silently deleting data.
-
-### Write Packfiles
-
-`Pack.write` accepts `[type, data]` object pairs, reports completed objects to an
-optional block, and returns the hexadecimal pack checksum:
-
-```ruby
-objects = object_ids.map { |oid| repo.object(oid) }
-File.open("out.pack", "wb") do |file|
-  checksum = Thuban::Pack.write(file, objects) do |current, total|
-    warn "#{current}/#{total}"
-  end
-end
-```
-
-The emitted PACK v2 stream stores complete compressed objects without delta
-generation. It can be consumed by `git index-pack` and `git verify-pack`.
-`Thuban::Pack.read_stream(io, repo.odb)` verifies and expands a received pack,
-including offset and reference deltas, into the supplied object database.
-
-### Inspect Remote References
-
-Smart HTTP discovery prefers protocol v2 and falls back to v0 when necessary:
-
-```ruby
-connection = Thuban::Remote.open("https://example.com/project.git")
-begin
-  connection.refs.each do |ref|
-    puts [ref.oid, ref.name, ref.symref_target, ref.peeled].compact.join(" ")
-  end
-ensure
-  connection.close
-end
-```
-
-Fetch selected object IDs directly, optionally providing local object IDs for
-negotiation:
-
-```ruby
-wanted = connection.refs.find { |ref| ref.name == "refs/heads/main" }.oid
-received_oids = connection.fetch(repo, wants: [wanted], haves: repo.refs.values.compact)
-```
-
-Authenticate with fixed Basic or Bearer credentials when appropriate:
-
-```ruby
-credentials = Thuban::Remote::Credentials.static(
-  username: ENV.fetch("GIT_USERNAME"),
-  password: ENV.fetch("GIT_PASSWORD")
-)
-connection = Thuban::Remote.open(remote_url, credentials: credentials)
-
-token = Thuban::Remote::Credentials.bearer(token: ENV.fetch("GIT_TOKEN"))
-connection = Thuban::Remote.open(remote_url, credentials: token)
-```
-
-For credentials that are selected or refreshed at runtime, return another
-credential object from a callback. The callback receives the remote URL with no
-embedded user information:
-
-```ruby
-credentials = Thuban::Remote::Credentials.callback do |url|
-  Thuban::Remote::Credentials.bearer(token: token_for(url))
-end
-```
-
-Use the normal configured Git credential helpers, or select a helper by name:
-
-```ruby
-credentials = Thuban::Remote::Credentials.helper
-credentials = Thuban::Remote::Credentials.helper("store --file=/secure/path")
-connection = Thuban::Remote.open(remote_url, credentials: credentials)
-```
-
-Helper lookup uses `git credential fill` with terminal prompting disabled and is
-bounded by the connection timeout. Thuban never includes credentials, helper
-output, response bodies, or remote URLs in transport errors. Credential objects
-also redact their inspection output. URL-embedded credentials and HTTP redirects
-remain rejected so an authorization header cannot be forwarded to another
-origin.
-
-For a repository with a normal `[remote "origin"]` configuration, the
-high-level operation reads its fetch refspec and updates remote-tracking refs:
-
-```ruby
-repo.remotes # => {"origin" => "https://example.com/project.git"}
-remote_refs = repo.fetch("origin")
-```
-
-Limit downloaded history or omit blobs while reporting bounded transfer and pack
-progress:
-
-```ruby
-repo.fetch("origin", depth: 1) { |event| warn "#{event.phase}: #{event.bytes}" }
-repo.fetch("origin", filter: "blob:none")
-```
-
-High-level fetch, push, and pull accept `credentials:`, `ssh:`, `timeout:`, and
-a zero-argument `cancelled:` callback. Cancellation closes a blocked transport
-and raises `Thuban::Cancelled`. A push may already have been applied remotely
-when cancellation is observed, so callers must refresh remote refs before retrying.
-
-`depth:` accepts positive 32-bit integers and `filter:` currently accepts only
-`"blob:none"`. Thuban negotiates only features advertised by the server. Shallow
-boundaries are atomically maintained in Git's `shallow` file. For configured
-remotes, partial fetches also set Git's `remote.<name>.promisor` and
-`remote.<name>.partialclonefilter` keys, so the Git executable can retrieve an
-omitted object later. Reading an omitted blob through Thuban raises `KeyError`;
-automatic promisor-object retrieval remains the caller's responsibility.
-Progress `bytes` are cumulative for `:pack` events and the current sideband
-message size for `:remote` events, matching push progress.
-
-Push one or more explicit refspecs. Normal updates must be fast-forward; use a
-lease for a guarded rewrite, or `force: true` for an unconditional one:
-
-```ruby
+repo.fetch("origin")
 repo.push("origin", refspecs: "refs/heads/main:refs/heads/main")
-repo.push("origin", refspecs: "refs/heads/topic:refs/heads/topic",
-  lease: expected_remote_oid)
-repo.push("origin", refspecs: [
-  "refs/heads/main:refs/heads/main",
-  "refs/tags/v1:refs/tags/v1"
-], atomic: true) { |progress| warn "#{progress.phase}: #{progress.current}/#{progress.total}" }
-```
-
-Pull updates the current branch, index, and worktree only when the named remote
-branch is a fast-forward. Tracked changes, detached HEADs, bare repositories,
-and untracked collisions are rejected; fetched objects and tracking refs remain
-available when the fast-forward cannot be applied:
-
-```ruby
 repo.pull("origin", branch: "main")
 ```
 
-Remote names, direct paths, `file://` URLs, HTTP(S), and SSH URLs are accepted.
-At the lower level, `Connection#push` accepts `[ref, old_oid, new_oid]` updates;
-the old object ID is an optimistic lease, and `nil` uses the advertised value.
-Deletion uses an empty source refspec such as `:refs/heads/topic`.
+Fetch updates configured remote-tracking refs. Push requires explicit
+refspecs and supports leases and atomic updates. Pull requires a clean
+tracked worktree and applies only fast-forward updates. See
+[remote transfers](https://noxdea.github.io/thuban/guide/#remotes) for
+authentication, shallow fetches, SSH options, progress, and cancellation.
 
-Fetched packs are checksum-verified, bounded by byte/object/expanded-size
-limits, and expanded through the existing object database. Redirects and
-URL-embedded credentials remain rejected.
+## Scope and limits
 
-SSH remotes accept both standard URL and scp-like forms. Thuban invokes the
-system SSH client without a local shell and uses `git-upload-pack` or
-`git-receive-pack` over its
-standard input and output:
+Thuban is a library for existing repositories. It does not expose `init`,
+`clone`, a command-line interface, or a general merge operation. SHA-256
+repositories, submodule checkout, automatic retrieval of omitted promisor
+objects, and pack delta generation are outside the current scope.
 
-```ruby
-connection = Thuban::Remote.open("ssh://git@example.com/project.git")
-connection = Thuban::Remote.open("git@example.com:project.git")
-```
+Worktree operations reject unsupported submodules and file collisions.
+Supported index and pack formats are covered by the test suite. See the
+[limits and error handling guide](https://noxdea.github.io/thuban/guide/#limits)
+before integrating write or transfer operations.
 
-Pass `ssh:` as an argument array or safely parsed command string to select a
-client and options. When omitted, `GIT_SSH_COMMAND` is parsed into arguments, or
-`ssh` is used by default:
+## Documentation
 
-```ruby
-connection = Thuban::Remote.open(remote_url, ssh: ["ssh", "-F", "/safe/config"])
-```
-
-SSH runs in batch mode, is bounded by `timeout:`, and discards stderr so remote
-paths and server diagnostics are not copied into exceptions. User, host, port,
-and path syntax is validated before process startup. Passwords in SSH URLs are
-not supported; use normal SSH agents and configuration instead. SSH fetches use
-the same shallow, partial, sideband progress, and pack validation paths as HTTP.
-
-### Match Ignored Paths
-
-Load Git's global excludes, `.git/info/exclude`, and nested `.gitignore` files.
-Thuban also reads nested `.ignore` files for editor compatibility:
-
-```ruby
-ignore = Thuban::IgnoreMatcher.load(Dir.pwd)
-ignore.ignored?("tmp/output.log")
-ignore.ignored?("build", directory: true)
-```
-
-Pass root-relative or absolute files as `extra_files:` to apply them last, or
-set `global: false` to skip `core.excludesFile` and the default global ignore
-file. Thuban resolves the setting from system, XDG, home, and repository config
-files, followed by an enabled worktree config. Included configs, line
-continuations, and command-scoped overrides are not evaluated.
-
-## Scope
-
-The current write API covers loose objects, the index, refs, reflogs, commits,
-guarded checkout, local history operations, stash, and delta-free pack output.
-Thuban can fetch and push local, smart HTTP, and SSH remotes, including shallow
-and blobless fetches. Merges, automatic retrieval of omitted promisor objects,
-and pack delta generation are outside the current scope. It does not provide
-its own diff algorithm; blame delegates line matching to Porrima through the
-injectable `differ:` argument.
-
-Support is limited to the index and pack formats covered by the test suite.
-Submodule checkout and optional Git extensions outside that coverage are not
-supported. Design decisions are recorded in [docs/adr](docs/adr/README.md).
+- [User Guide](https://noxdea.github.io/thuban/guide/)
+- [Repository data and status](https://noxdea.github.io/thuban/guide/#reading)
+- [Writing and conflict resolution](https://noxdea.github.io/thuban/guide/#writing)
+- [Remote transfers and authentication](https://noxdea.github.io/thuban/guide/#remotes)
+- [Development](https://noxdea.github.io/thuban/guide/#development)
+- [Architecture decisions](docs/adr/README.md)
+- [Type signatures](sig/thuban.rbs)
+- [Changelog](CHANGELOG.md)
 
 ## Development
 
@@ -425,15 +163,11 @@ bundle exec rake
 ruby tools/check_isolation.rb
 bundle exec rbs -I sig -r porrima validate
 gem build --strict thuban.gemspec
-ruby bench/pack_write.rb --assert
-ruby bench/ssh_fetch.rb --assert
 ```
-
-## Contributing
 
 Bug reports and pull requests are welcome on
 [GitHub](https://github.com/noxdea/thuban).
 
 ## License
 
-Thuban is available under the [MIT License](LICENSE.txt).
+Thuban is released under the [MIT License](LICENSE.txt).
