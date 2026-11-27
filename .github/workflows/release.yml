@@ -32,7 +32,7 @@ jobs:
           ruby tools/check_isolation.rb
           bundle exec rbs -I sig -r porrima validate
           gem build --strict thuban.gemspec --output /tmp/thuban.gem
-      - uses: rubygems/release-gem@7f9650160c1a4e7989fdc9855807bdbd421d8b6b # v1.4.1
+      - uses: rubygems/release-gem@5c53f5308233b7c0f47411f0471b3faae6fa57b2 # v1.4.2
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
